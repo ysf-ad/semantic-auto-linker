@@ -1,29 +1,42 @@
 {
-	"name": "obsidian-sample-plugin",
+	"name": "semantic-auto-linker",
 	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"description": "Safe and reviewable auto-linking for Obsidian",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test:semantic": "node --test tests/dev-vault-semantic.test.mjs",
+		"bench:semantic": "node tests/dev-vault-semantic-bench.mjs",
+		"sync:dev-vault": "powershell -NoProfile -Command \"Copy-Item main.js,manifest.json,styles.css -Destination .\\dev-vault\\.obsidian\\plugins\\semantic-auto-linker -Force\"",
+		"build:dev-vault": "npm run build && npm run sync:dev-vault",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint ."
 	},
 	"keywords": [],
 	"license": "0-BSD",
 	"devDependencies": {
+		"@eslint/js": "9.30.1",
 		"@types/node": "^16.11.6",
+		"@types/three": "^0.183.1",
 		"esbuild": "0.25.5",
 		"eslint-plugin-obsidianmd": "0.1.9",
 		"globals": "14.0.0",
+		"jiti": "2.6.1",
 		"tslib": "2.4.0",
 		"typescript": "^5.8.3",
-		"typescript-eslint": "8.35.1",
-		"@eslint/js": "9.30.1",
-		"jiti": "2.6.1"
+		"typescript-eslint": "8.35.1"
 	},
 	"dependencies": {
-		"obsidian": "latest"
+		"3d-force-graph": "^1.79.1",
+		"d3-force-3d": "^3.0.6",
+		"force-graph": "^1.51.2",
+		"hnsw": "^1.1.1",
+		"ml-pca": "^4.1.1",
+		"obsidian": "latest",
+		"three": "^0.150.1",
+		"three-spritetext": "^1.10.0",
+		"tsne-js": "^1.0.3"
 	}
 }

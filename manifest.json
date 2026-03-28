@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "semantic-auto-linker",
+	"name": "Semantic Auto-Linker",
 	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+	"minAppVersion": "1.5.0",
+	"description": "Safely suggests and inserts wiki links across your Obsidian notes.",
+	"author": "yousi",
+	"authorUrl": "https://github.com/yousi",
+	"isDesktopOnly": true
 }

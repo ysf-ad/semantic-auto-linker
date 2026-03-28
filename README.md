@@ -1,90 +1,122 @@
-# Obsidian Sample Plugin
+# Semantic Auto-Linker
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Semantic Auto-Linker is an Obsidian community plugin for safe, reviewable wiki-link insertion with optional local semantic retrieval.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+It focuses on two things:
+- safe inline linking with review before write
+- vault-wide review with graph impact and semantic exploration
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## Features
 
-## First time developing plugins?
+- Analyze the current note and review suggested inline `[[links]]`
+- Analyze the whole vault and review suggestions before applying
+- Switch insertion mode per review:
+  - `Inline` updates matched text in place
+  - `Footer` writes accepted targets into a footer section
+- Strong safety rules:
+  - skip frontmatter
+  - skip fenced code and inline code
+  - skip existing wikilinks and Markdown links
+  - skip self-links
+  - avoid duplicate link targets in the same note
+- Deterministic matching for titles, aliases, normalization, and acronyms
+- Optional semantic retrieval with a local Ollama embedding model
+- Embedding explorer with PCA and t-SNE note/concept views
+- Persistent whole-vault review state with background refresh when notes change
 
-Quick starting guide for new plugin devs:
+## Semantic mode
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+Semantic mode is optional and local-first.
 
-## Releasing new releases
+Current provider support:
+- Ollama
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+Typical setup:
+1. Install and run [Ollama](https://ollama.com/).
+2. Pull an embedding model, for example:
+   - `ollama pull embeddinggemma`
+3. In Obsidian, open **Settings → Community plugins → Semantic Auto-Linker**.
+4. Enable **Semantic mode**.
+5. Select the Ollama provider and model.
+6. Run **Build semantic embeddings**.
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+## Privacy and network behavior
 
-## Adding your plugin to the community plugin list
+- The plugin is local/offline by default for deterministic linking.
+- Semantic mode is opt-in.
+- When semantic mode uses Ollama, the plugin sends note-derived text to the configured Ollama endpoint, which is typically `http://127.0.0.1:11434`.
+- No telemetry or analytics are included.
+- No cloud service is required.
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+## Commands
 
-## How to use
+- `Open control panel`
+- `Analyze current note for safe links`
+- `Auto-link current selection`
+- `Analyze whole vault for safe links`
+- `Show embedding explorer`
+- `Build or rebuild semantic index`
+- `Build or rebuild note index`
+- `Show related notes`
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+## Development
 
-## Manually installing the plugin
+Install dependencies:
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+```bash
+npm install
 ```
 
-If you have multiple URLs, you can also do:
+Build:
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
+```bash
+npm run build
 ```
 
-## API Documentation
+Lint:
 
-See https://docs.obsidian.md
+```bash
+npm run lint
+```
+
+Semantic regression tests:
+
+```bash
+npm run test:semantic
+```
+
+Dev vault sync:
+
+```bash
+npm run build:dev-vault
+```
+
+## Manual install
+
+Copy these files into:
+
+```text
+<Vault>/.obsidian/plugins/semantic-auto-linker/
+```
+
+Files:
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+Then reload Obsidian and enable the plugin in **Settings → Community plugins**.
+
+## Known limitations
+
+- Semantic suggestions are still more conservative and less reliable than deterministic title/alias matches.
+- Semantic quality depends heavily on the local embedding model.
+- The plugin is currently desktop-only.
+
+## Release
+
+Marketplace release assets:
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+`manifest.json` and `versions.json` must be updated together for each release version.
