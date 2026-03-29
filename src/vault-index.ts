@@ -36,9 +36,9 @@ export class VaultIndex {
 		return this.notesByPath.get(path) ?? null;
 	}
 
-	async rebuild(): Promise<void> {
+	rebuild(): Promise<void> {
 		if (this.rebuilding) {
-			return;
+			return Promise.resolve();
 		}
 		this.rebuilding = true;
 
@@ -53,15 +53,17 @@ export class VaultIndex {
 		} finally {
 			this.rebuilding = false;
 		}
+		return Promise.resolve();
 	}
 
-	async refreshFile(file: TFile): Promise<void> {
+	refreshFile(file: TFile): Promise<void> {
 		if (!this.shouldInclude(file)) {
 			this.removeFile(file.path);
-			return;
+			return Promise.resolve();
 		}
 		this.removeFile(file.path);
 		this.insertRecord(this.buildRecord(file));
+		return Promise.resolve();
 	}
 
 	removeFile(path: string): void {

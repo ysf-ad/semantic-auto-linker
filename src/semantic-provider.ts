@@ -24,15 +24,15 @@ class DisabledSemanticProvider implements SemanticProvider {
 		return "none";
 	}
 
-	async checkAvailability(_settings: SemanticAutoLinkerSettings): Promise<SemanticProviderAvailability> {
-		return {
+	checkAvailability(_settings: SemanticAutoLinkerSettings): Promise<SemanticProviderAvailability> {
+		return Promise.resolve({
 			available: false,
 			reason: "No semantic provider selected.",
-		};
+		});
 	}
 
-	async embed(_text: string, _settings: SemanticAutoLinkerSettings): Promise<number[]> {
-		throw new Error("Semantic provider is disabled.");
+	embed(_text: string, _settings: SemanticAutoLinkerSettings): Promise<number[]> {
+		return Promise.reject(new Error("Semantic provider is disabled."));
 	}
 }
 

@@ -774,14 +774,15 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		}, delay);
 	}
 
-	private async persistCurrentVaultAnalysis(): Promise<void> {
+	private persistCurrentVaultAnalysis(): Promise<void> {
 		if (!this.lastVaultAnalysis) {
 			this.persistedVaultAnalysisSnapshot = null;
 			this.schedulePluginDataSave();
-			return;
+			return Promise.resolve();
 		}
 		this.persistedVaultAnalysisSnapshot = serializeVaultAnalysis(this.lastVaultAnalysis, this.analysisRevision);
 		this.schedulePluginDataSave();
+		return Promise.resolve();
 	}
 
 	private async ensureVaultAnalysisAvailable(): Promise<void> {
@@ -1010,7 +1011,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		const progressModal = this.settings.semanticMode && options.showProgress ? new SemanticBuildProgressModal(this.app) : null;
 		progressModal?.open();
 		try {
-			const status = await this.semanticIndex.rebuild(async (progress) => {
+			const status = await this.semanticIndex.rebuild((progress) => {
 				this.handleSemanticBuildProgress(progressModal, progress);
 			});
 			await this.savePluginData();
