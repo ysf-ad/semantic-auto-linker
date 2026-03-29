@@ -95,7 +95,7 @@ export class EmbeddingExplorerModal extends Modal {
 			{ value: "semantic", label: "By semantic cluster" },
 			{ value: "location", label: "By location" },
 			{ value: "none", label: "Neutral" },
-		], async (value) => {
+		], (value) => {
 			this.colorMode = value as ColorMode;
 			this.renderGraph();
 		});

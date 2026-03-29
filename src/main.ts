@@ -421,12 +421,13 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		}));
 		this.registerEvent(this.app.vault.on("delete", (file) => {
 			if (file instanceof TFile) {
-				void this.handleVaultMutation(async () => {
+				void this.handleVaultMutation(() => {
 					this.index.removeFile(file.path);
 					this.semanticIndex.removeFile(file.path);
 					this.pendingIndexPaths.add(file.path);
 					this.pendingSemanticPaths.add(file.path);
 					this.markVaultAnalysisDirty([file.path]);
+					return Promise.resolve();
 				});
 			}
 		}));
@@ -835,7 +836,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 				this.settings,
 				this.semanticIndex,
 				async (record) => this.app.vault.read(record.file),
-				async (progress) => {
+				(progress) => {
 					this.handleVaultAnalysisProgress(progress);
 				},
 			);
