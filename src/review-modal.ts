@@ -111,17 +111,17 @@ export class LinkReviewModal extends Modal {
 			};
 
 			const body = row.createDiv({ cls: "semantic-auto-linker-row-body" });
-			body.createEl("div", {
+			body.createDiv({
 				text: `"${suggestion.matchedText}" -> [[${suggestion.targetTitle}]]`,
 				cls: "semantic-auto-linker-row-title",
 			});
-			body.createEl("div", {
+			body.createDiv({
 				text: `${suggestion.reason} | ${(suggestion.confidence * 100).toFixed(0)}%`,
 				cls: "semantic-auto-linker-row-meta",
 			});
 			const details = body.createEl("details", { cls: "semantic-auto-linker-row-details" });
 			details.createEl("summary", { text: "Preview" });
-			details.createEl("div", {
+			details.createDiv({
 				text: suggestion.context,
 				cls: "semantic-auto-linker-row-context",
 			});
@@ -206,7 +206,7 @@ export class VaultReviewModal extends Modal {
 		if (this.analysis) {
 			this.graphPanel = new GraphPreviewPanel(this.app, this.graphHostEl, this.analysis, "after");
 		} else {
-			this.graphHostEl.createEl("div", {
+			this.graphHostEl.createDiv({
 				text: "Building whole-vault review and graph preview...",
 				cls: "semantic-auto-linker-empty-state",
 			});
@@ -434,17 +434,17 @@ export class VaultReviewModal extends Modal {
 				};
 
 				const body = row.createDiv({ cls: "semantic-auto-linker-row-body" });
-				body.createEl("div", {
+				body.createDiv({
 					text: `"${entry.suggestion.matchedText}" -> [[${entry.suggestion.targetTitle}]]`,
 					cls: "semantic-auto-linker-row-title",
 				});
-				body.createEl("div", {
+				body.createDiv({
 					text: `${entry.result.file.basename} | ${entry.suggestion.reason} | ${(entry.suggestion.confidence * 100).toFixed(0)}%`,
 					cls: "semantic-auto-linker-row-meta",
 				});
 				const details = body.createEl("details", { cls: "semantic-auto-linker-row-details" });
 				details.createEl("summary", { text: "Context" });
-				details.createEl("div", {
+				details.createDiv({
 					text: entry.suggestion.context,
 					cls: "semantic-auto-linker-row-context",
 				});
@@ -498,17 +498,17 @@ export class VaultReviewModal extends Modal {
 				};
 
 				const body = row.createDiv({ cls: "semantic-auto-linker-row-body" });
-				body.createEl("div", {
+				body.createDiv({
 					text: `"${suggestion.matchedText}" -> [[${suggestion.targetTitle}]]`,
 					cls: "semantic-auto-linker-row-title",
 				});
-				body.createEl("div", {
+				body.createDiv({
 					text: `${suggestion.reason} | ${(suggestion.confidence * 100).toFixed(0)}%`,
 					cls: "semantic-auto-linker-row-meta",
 				});
 				const details = body.createEl("details", { cls: "semantic-auto-linker-row-details" });
 				details.createEl("summary", { text: "Context" });
-				details.createEl("div", {
+				details.createDiv({
 					text: suggestion.context,
 					cls: "semantic-auto-linker-row-context",
 				});
@@ -694,7 +694,7 @@ function createThresholdAcceptMenu(
 	const panel = wrapper.createDiv({ cls: "semantic-auto-linker-threshold-panel" });
 	panel.setCssProps({ display: "none" });
 
-	const label = panel.createEl("div", {
+	const label = panel.createDiv({
 		text: `Accept semantic >= ${(settings.semanticAcceptanceThreshold * 100).toFixed(0)}%`,
 		cls: "semantic-auto-linker-threshold-label",
 	});
@@ -707,7 +707,7 @@ function createThresholdAcceptMenu(
 	slider.step = "1";
 	slider.value = String(Math.round(settings.semanticAcceptanceThreshold * 100));
 
-	const valueEl = panel.createEl("div", {
+	const valueEl = panel.createDiv({
 		text: `${Math.round(settings.semanticAcceptanceThreshold * 100)}%`,
 		cls: "semantic-auto-linker-threshold-value",
 	});
@@ -792,11 +792,11 @@ export class RelatedNotesModal extends Modal {
 
 		for (const suggestion of this.suggestions) {
 			const row = contentEl.createDiv({ cls: "semantic-auto-linker-row" });
-			row.createEl("div", {
+			row.createDiv({
 				text: `[[${suggestion.targetTitle}]]`,
 				cls: "semantic-auto-linker-row-title",
 			});
-			row.createEl("div", {
+			row.createDiv({
 				text: `${suggestion.reason}${suggestion.matchType ? ` | ${suggestion.matchType}` : ""} | score ${suggestion.score}`,
 				cls: "semantic-auto-linker-row-meta",
 			});

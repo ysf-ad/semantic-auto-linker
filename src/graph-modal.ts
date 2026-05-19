@@ -274,10 +274,10 @@ function renderStats(containerEl: HTMLElement, analysis: VaultAnalysisResult, mo
 	const title = containerEl.createDiv({ cls: "semantic-auto-linker-graph-summary-title" });
 	setIcon(title.createSpan({ cls: "semantic-auto-linker-graph-summary-icon" }), mode === "before" ? "git-branch" : "sparkles");
 	title.createSpan({ text: mode === "before" ? "Current graph" : "Projected graph" });
-	containerEl.createEl("div", { text: `Notes: ${analysis.graphPreview.nodes.length}` });
-	containerEl.createEl("div", { text: `Visible edges: ${edgeCount}` });
-	containerEl.createEl("div", { text: `Existing links: ${analysis.graphMetrics.existingLinkCount}` });
-	containerEl.createEl("div", { text: `Added links: ${analysis.graphMetrics.projectedAddedLinks}` });
+	containerEl.createDiv({ text: `Notes: ${analysis.graphPreview.nodes.length}` });
+	containerEl.createDiv({ text: `Visible edges: ${edgeCount}` });
+	containerEl.createDiv({ text: `Existing links: ${analysis.graphMetrics.existingLinkCount}` });
+	containerEl.createDiv({ text: `Added links: ${analysis.graphMetrics.projectedAddedLinks}` });
 }
 
 function renderTopList(containerEl: HTMLElement, nodes: GraphNode[], mode: GraphMode): void {

@@ -48,6 +48,8 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	private lastAutoMaintenanceAt = Date.now();
 	private viewRefreshHandle: number | null = null;
 	private pluginDataSaveHandle: number | null = null;
+	private maintenanceTimeoutHandle: number | null = null;
+	private cursorPollTimeoutHandle: number | null = null;
 	private activeVaultReviewModal: VaultReviewModal | null = null;
 	private vaultAnalysisRunPromise: Promise<void> | null = null;
 	private vaultAnalysisRefreshHandle: number | null = null;
@@ -76,12 +78,8 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		this.addCommands();
 		this.registerVaultEvents();
 		this.registerWorkspaceEvents();
-		this.registerInterval(window.setInterval(() => {
-			void this.maybeRunAutoMaintenance();
-		}, 60_000));
-		this.registerInterval(window.setInterval(() => {
-			this.maybeRefreshForCursorMovement();
-		}, 250));
+		this.startMaintenanceLoop();
+		this.startCursorPollLoop();
 
 		this.app.workspace.onLayoutReady(async () => {
 			await this.rebuildIndex("Initial note index built");
@@ -473,7 +471,38 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 			return;
 		}
 		await leaf.setViewState({ type: SEMANTIC_AUTO_LINKER_VIEW_TYPE, active: true });
-		void this.app.workspace.revealLeaf(leaf);
+	}
+
+	private startMaintenanceLoop(): void {
+		const tick = () => {
+			this.maintenanceTimeoutHandle = window.setTimeout(() => {
+				void this.maybeRunAutoMaintenance();
+				tick();
+			}, 60_000);
+		};
+		tick();
+		this.register(() => {
+			if (this.maintenanceTimeoutHandle) {
+				window.clearTimeout(this.maintenanceTimeoutHandle);
+				this.maintenanceTimeoutHandle = null;
+			}
+		});
+	}
+
+	private startCursorPollLoop(): void {
+		const tick = () => {
+			this.cursorPollTimeoutHandle = window.setTimeout(() => {
+				this.maybeRefreshForCursorMovement();
+				tick();
+			}, 250);
+		};
+		tick();
+		this.register(() => {
+			if (this.cursorPollTimeoutHandle) {
+				window.clearTimeout(this.cursorPollTimeoutHandle);
+				this.cursorPollTimeoutHandle = null;
+			}
+		});
 	}
 
 	private refreshView(): void {

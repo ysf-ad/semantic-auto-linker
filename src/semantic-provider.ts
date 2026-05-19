@@ -191,7 +191,7 @@ function buildMissingModelReason(requested: string, models: Array<{ name?: strin
 	return `Ollama model "${requested}" was not found. Available models: ${availableModels.join(", ")}.`;
 }
 
-async function requestJson<T>(url: string, init: RequestInit, timeoutMs = 15000): Promise<T> {
+async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
 	const response = await requestUrl({
 		url,
 		method: init.method,
@@ -232,7 +232,7 @@ async function canEmbedWithOllama(baseUrl: string, model: string): Promise<boole
 				input: "semantic-auto-linker model probe",
 				truncate: true,
 			}),
-		}, 3000);
+		});
 		return Array.isArray(payload.embeddings) && payload.embeddings.length > 0;
 	} catch {
 		return false;

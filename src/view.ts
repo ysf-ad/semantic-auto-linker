@@ -96,13 +96,13 @@ async function renderSidebarAutoLinkSuggestions(
 		return;
 	}
 
-	containerEl.createEl("div", {
+	containerEl.createDiv({
 		text: `Auto-Link suggestions for ${related.noteTitle}`,
 		cls: "semantic-auto-linker-section-title",
 	});
 
 	if (related.suggestions.length === 0) {
-		containerEl.createEl("div", {
+		containerEl.createDiv({
 			text: "No inline auto-link suggestions for the current note yet.",
 			cls: "semantic-auto-linker-empty-state",
 		});
@@ -120,7 +120,7 @@ function renderStatusSection(containerEl: HTMLElement, plugin: SemanticAutoLinke
 	containerEl.empty();
 	const semanticStatus = plugin.getSemanticStatus();
 	const activeSemantic = plugin.getActiveSemanticIndicator();
-	containerEl.createEl("div", { text: "Status", cls: "semantic-auto-linker-section-title" });
+	containerEl.createDiv({ text: "Status", cls: "semantic-auto-linker-section-title" });
 
 	const cards = containerEl.createDiv({ cls: "semantic-auto-linker-status-grid" });
 	createMetricCard(cards, "Indexed notes", String(plugin.getIndexSize()));
@@ -133,7 +133,7 @@ function renderStatusSection(containerEl: HTMLElement, plugin: SemanticAutoLinke
 	const progressFill = progressTrack.createDiv({ cls: "semantic-auto-linker-status-progress-fill" });
 	const ratio = semanticStatus.noteCount > 0 ? semanticStatus.cachedCount / semanticStatus.noteCount : 0;
 	progressFill.setCssProps({ width: `${Math.max(6, Math.round(ratio * 100))}%` });
-	progressShell.createEl("div", {
+	progressShell.createDiv({
 		text: semanticStatus.noteCount > 0
 			? `${Math.round(ratio * 100)}% cached${semanticStatus.pendingCount > 0 ? ` • ${semanticStatus.pendingCount} pending` : ""}`
 			: "Semantic cache not built yet.",
@@ -160,7 +160,7 @@ function renderStatusSection(containerEl: HTMLElement, plugin: SemanticAutoLinke
 
 function renderActionSection(containerEl: HTMLElement, plugin: SemanticAutoLinkerPlugin): void {
 	containerEl.empty();
-	containerEl.createEl("div", { text: "Actions", cls: "semantic-auto-linker-section-title" });
+	containerEl.createDiv({ text: "Actions", cls: "semantic-auto-linker-section-title" });
 	const grid = containerEl.createDiv({ cls: "semantic-auto-linker-action-grid" });
 	const vaultAnalysisJob = plugin.getVaultAnalysisJobState();
 	const showVaultProgress = vaultAnalysisJob.status === "running" || vaultAnalysisJob.status === "updating";
@@ -229,10 +229,10 @@ function renderActionSection(containerEl: HTMLElement, plugin: SemanticAutoLinke
 
 function renderAnalysisSummary(containerEl: HTMLElement, analysis: VaultAnalysisResult | null): void {
 	containerEl.empty();
-	containerEl.createEl("div", { text: "Vault preview", cls: "semantic-auto-linker-section-title" });
+	containerEl.createDiv({ text: "Vault preview", cls: "semantic-auto-linker-section-title" });
 
 	if (!analysis) {
-		containerEl.createEl("div", {
+		containerEl.createDiv({
 			text: "Run whole-vault analysis to preview affected notes and projected link growth.",
 			cls: "semantic-auto-linker-empty-state",
 		});
@@ -248,14 +248,14 @@ function renderAnalysisSummary(containerEl: HTMLElement, analysis: VaultAnalysis
 
 function createMetricCard(containerEl: HTMLElement, label: string, value: string): void {
 	const card = containerEl.createDiv({ cls: "semantic-auto-linker-metric-card" });
-	card.createEl("div", { text: label, cls: "semantic-auto-linker-metric-label" });
-	card.createEl("div", { text: value, cls: "semantic-auto-linker-metric-value" });
+	card.createDiv({ text: label, cls: "semantic-auto-linker-metric-label" });
+	card.createDiv({ text: value, cls: "semantic-auto-linker-metric-value" });
 }
 
 function createPreviewChip(containerEl: HTMLElement, label: string, value: string): void {
 	const chip = containerEl.createDiv({ cls: "semantic-auto-linker-preview-chip" });
-	chip.createEl("div", { text: value, cls: "semantic-auto-linker-preview-value" });
-	chip.createEl("div", { text: label, cls: "semantic-auto-linker-preview-label" });
+	chip.createDiv({ text: value, cls: "semantic-auto-linker-preview-value" });
+	chip.createDiv({ text: label, cls: "semantic-auto-linker-preview-label" });
 }
 
 function createRelatedRow(containerEl: HTMLElement, plugin: SemanticAutoLinkerPlugin, suggestion: LinkSuggestion): void {
@@ -264,20 +264,20 @@ function createRelatedRow(containerEl: HTMLElement, plugin: SemanticAutoLinkerPl
 	card.setAttribute("role", "button");
 
 	const header = card.createDiv({ cls: "semantic-auto-linker-related-header" });
-	header.createEl("div", {
+	header.createDiv({
 		text: `"${suggestion.matchedText}"`,
 		cls: "semantic-auto-linker-related-title",
 	});
-	header.createEl("div", {
+	header.createDiv({
 		text: `[[${suggestion.targetTitle}]]`,
 		cls: "semantic-auto-linker-related-target",
 	});
 
-	card.createEl("div", {
+	card.createDiv({
 		text: `${suggestion.reason} • ${Math.round(suggestion.confidence * 100)}%`,
 		cls: "semantic-auto-linker-related-meta",
 	});
-	card.createEl("div", {
+	card.createDiv({
 		text: suggestion.context,
 		cls: "semantic-auto-linker-related-preview",
 	});

@@ -45,6 +45,7 @@ Typical setup:
 - The plugin is local/offline by default for deterministic linking.
 - Semantic mode is opt-in.
 - When semantic mode uses Ollama, the plugin sends note-derived text to the configured Ollama endpoint, which is typically `http://127.0.0.1:11434`.
+- Auto-maintenance can rebuild the note index and semantic cache after vault changes if you enable it in settings.
 - No telemetry or analytics are included.
 - No cloud service is required.
 

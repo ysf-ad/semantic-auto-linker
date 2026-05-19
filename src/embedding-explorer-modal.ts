@@ -261,7 +261,7 @@ export class EmbeddingExplorerModal extends Modal {
 			const message = error instanceof Error ? error.message : "Projection failed";
 			if (this.summaryEl) {
 				this.summaryEl.empty();
-				this.summaryEl.createEl("div", { text: `Projection failed: ${message}` });
+				this.summaryEl.createDiv({ text: `Projection failed: ${message}` });
 			}
 		}
 	}
@@ -273,7 +273,7 @@ export class EmbeddingExplorerModal extends Modal {
 
 		this.summaryEl.empty();
 		if (this.points.length === 0) {
-			this.summaryEl.createEl("div", { text: "No semantic vectors are available for projection yet." });
+			this.summaryEl.createDiv({ text: "No semantic vectors are available for projection yet." });
 			this.graph.graphData({ nodes: [], links: [] });
 			return;
 		}
@@ -288,12 +288,12 @@ export class EmbeddingExplorerModal extends Modal {
 			.numDimensions(this.dimensions)
 			.graphData({ nodes, links });
 
-		this.summaryEl.createEl("div", {
+		this.summaryEl.createDiv({
 			text: `${this.points.length} ${this.projectionScope} projected with ${this.mode.toUpperCase()} in ${this.dimensions}D. Click a node to open the note.`,
 			cls: "semantic-auto-linker-embedding-summary-main",
 		});
-		this.summaryEl.createEl("div", { text: `${links.length} neighborhood links` });
-		this.summaryEl.createEl("div", {
+		this.summaryEl.createDiv({ text: `${links.length} neighborhood links` });
+		this.summaryEl.createDiv({
 			text:
 				this.colorMode === "semantic"
 					? "Colored by semantic neighborhood cluster"
@@ -301,7 +301,7 @@ export class EmbeddingExplorerModal extends Modal {
 						? "Colored by top-level folder"
 						: "Neutral node colors",
 		});
-		this.summaryEl.createEl("div", { text: this.mode === "pca" ? "Global structure preserved" : "Local neighborhoods emphasized" });
+		this.summaryEl.createDiv({ text: this.mode === "pca" ? "Global structure preserved" : "Local neighborhoods emphasized" });
 		if (this.dimensions === 3) {
 			renderSeparationMatrixAccordion(this.summaryEl, this.points);
 		}
@@ -621,20 +621,18 @@ function renderSeparationMatrixAccordion(containerEl: HTMLElement, points: Seman
 	});
 	const matrixBody = wrapper.createDiv({ cls: "semantic-auto-linker-embedding-matrix-body" });
 	const table = matrixBody.createEl("table");
-		const headRow = table.createTHead().insertRow();
-		headRow.appendChild(document.createElement("th"));
+	const headRow = table.createTHead().insertRow();
+	headRow.createEl("th");
 	for (const region of regions) {
-		const cell = document.createElement("th");
+		const cell = headRow.createEl("th");
 		cell.textContent = truncateLabel(region, 10);
-		headRow.appendChild(cell);
 	}
 
 	const body = table.createTBody();
 	for (const rowRegion of regions) {
 		const row = body.insertRow();
-		const labelCell = document.createElement("th");
+		const labelCell = row.createEl("th");
 		labelCell.textContent = truncateLabel(rowRegion, 10);
-		row.appendChild(labelCell);
 		for (const columnRegion of regions) {
 			const cell = row.insertCell();
 			if (rowRegion === columnRegion) {
