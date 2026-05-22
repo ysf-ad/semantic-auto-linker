@@ -199,8 +199,6 @@ function defaultSettings() {
 		semanticSummaryLength: 280,
 		semanticOllamaBaseUrl: "http://127.0.0.1:11434",
 		semanticOllamaModel: "embeddinggemma",
-		semanticProjectionPerplexity: 12,
-		semanticProjectionIterations: 700,
 		semanticProjectionMetric: "cosine",
 		semanticExplorerLabelDistance: 620,
 		semanticDisplayThreshold: 0.3,

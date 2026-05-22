@@ -18,8 +18,6 @@ export const DEFAULT_SETTINGS: SemanticAutoLinkerSettings = {
 	semanticSummaryLength: 280,
 	semanticOllamaBaseUrl: "http://127.0.0.1:11434",
 	semanticOllamaModel: "embeddinggemma",
-	semanticProjectionPerplexity: 12,
-	semanticProjectionIterations: 700,
 	semanticProjectionMetric: "cosine",
 	semanticExplorerLabelDistance: 620,
 	semanticDisplayThreshold: 0.3,
@@ -254,34 +252,6 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.semanticProjectionMetric)
 					.onChange(async (value) => {
 						this.plugin.settings.semanticProjectionMetric = value as SemanticAutoLinkerSettings["semanticProjectionMetric"];
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-				.setName("Projection perplexity")
-				.setDesc("Neighborhood size bias for the embedding view.")
-			.addSlider((slider) =>
-				slider
-					.setLimits(5, 40, 1)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.semanticProjectionPerplexity)
-					.onChange(async (value) => {
-						this.plugin.settings.semanticProjectionPerplexity = value;
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-				.setName("Projection iterations")
-				.setDesc("Optimization budget for the embedding view.")
-			.addSlider((slider) =>
-				slider
-					.setLimits(200, 1200, 50)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.semanticProjectionIterations)
-					.onChange(async (value) => {
-						this.plugin.settings.semanticProjectionIterations = value;
 						await this.plugin.saveSettings();
 					}),
 			);

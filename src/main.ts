@@ -70,7 +70,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 			(leaf) => new SemanticAutoLinkerView(leaf, this),
 		);
 
-		this.addRibbonIcon("links-coming-in", "Semantic auto-linker", () => {
+		this.addRibbonIcon("git-branch", "Semantic auto-linker", () => {
 			void this.activateView();
 		});
 
@@ -466,11 +466,13 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 
 	private async activateView(): Promise<void> {
 		const existingLeaf = this.app.workspace.getLeavesOfType(SEMANTIC_AUTO_LINKER_VIEW_TYPE)[0];
-		const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false);
+		const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(true);
 		if (!leaf) {
 			return;
 		}
 		await leaf.setViewState({ type: SEMANTIC_AUTO_LINKER_VIEW_TYPE, active: true });
+		this.app.workspace.rightSplit.expand();
+		this.app.workspace.setActiveLeaf(leaf, { focus: true });
 	}
 
 	private startMaintenanceLoop(): void {

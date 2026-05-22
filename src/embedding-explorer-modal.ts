@@ -5,7 +5,6 @@ import type SemanticAutoLinkerPlugin from "./main";
 import type { SemanticProjectionPoint } from "./types";
 import type { SemanticIndex } from "./semantic-index";
 
-type ProjectionMode = "pca" | "tsne";
 type ProjectionDimensions = 2 | 3;
 type ProjectionScope = "notes" | "concepts";
 type ColorMode = "semantic" | "location" | "none";
@@ -37,7 +36,6 @@ export class EmbeddingExplorerModal extends Modal {
 	private plugin: SemanticAutoLinkerPlugin;
 	private semanticIndex: SemanticIndex;
 	private projectionScope: ProjectionScope = "notes";
-	private mode: ProjectionMode = "pca";
 	private dimensions: ProjectionDimensions = 3;
 	private colorMode: ColorMode = "semantic";
 	private graphHostEl: HTMLElement | null = null;
@@ -74,14 +72,6 @@ export class EmbeddingExplorerModal extends Modal {
 			{ value: "concepts", label: "Concepts" },
 		], async (value) => {
 			this.projectionScope = value as ProjectionScope;
-			await this.refreshProjection(false);
-		});
-		this.createSelectControl(toolbar, "Projection", this.mode, [
-			{ value: "pca", label: "PCA" },
-			{ value: "tsne", label: "t-SNE" },
-		], async (value) => {
-			this.mode = value as ProjectionMode;
-			this.updateProjectionSettingsVisibility();
 			await this.refreshProjection(false);
 		});
 		this.createSelectControl(toolbar, "Dimensions", String(this.dimensions), [
@@ -126,44 +116,6 @@ export class EmbeddingExplorerModal extends Modal {
 			);
 		metricSetting.settingEl.addClass("semantic-auto-linker-embedding-setting-row");
 
-			const perplexitySetting = new Setting(settingsBody)
-				.setName("Perplexity")
-			.setDesc("Higher values spread attention across a broader local neighborhood.")
-			.addSlider((slider) =>
-				slider
-					.setLimits(5, 40, 1)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.semanticProjectionPerplexity)
-					.onChange(async (value) => {
-						this.plugin.settings.semanticProjectionPerplexity = value;
-						await this.plugin.saveSettings();
-						if (this.mode === "tsne") {
-							await this.refreshProjection(false);
-						}
-					}),
-			);
-		perplexitySetting.settingEl.addClass("semantic-auto-linker-embedding-setting-row");
-		perplexitySetting.settingEl.addClass("semantic-auto-linker-embedding-setting-tsne");
-
-			const iterationsSetting = new Setting(settingsBody)
-				.setName("Iterations")
-			.setDesc("More iterations usually tighten clusters, but take longer.")
-			.addSlider((slider) =>
-				slider
-					.setLimits(200, 1200, 50)
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.semanticProjectionIterations)
-					.onChange(async (value) => {
-						this.plugin.settings.semanticProjectionIterations = value;
-						await this.plugin.saveSettings();
-						if (this.mode === "tsne") {
-							await this.refreshProjection(false);
-						}
-					}),
-			);
-		iterationsSetting.settingEl.addClass("semantic-auto-linker-embedding-setting-row");
-		iterationsSetting.settingEl.addClass("semantic-auto-linker-embedding-setting-tsne");
-
 		const labelDistanceSetting = new Setting(settingsBody)
 			.setName("Label distance")
 			.setDesc("Nearest labels within this distance stay visible; farther labels fade out.")
@@ -184,7 +136,6 @@ export class EmbeddingExplorerModal extends Modal {
 		this.graphHostEl = contentEl.createDiv({ cls: "semantic-auto-linker-embedding-host" });
 		const controlsHint = this.graphHostEl.createDiv({ cls: "semantic-auto-linker-embedding-controls-hint" });
 		controlsHint.setText("Drag: rotate  Shift+drag: pan  Scroll: zoom");
-		this.updateProjectionSettingsVisibility();
 		this.createGraph();
 		void this.refreshProjection(false);
 	}
@@ -252,10 +203,10 @@ export class EmbeddingExplorerModal extends Modal {
 
 	private async refreshProjection(forceNotice: boolean): Promise<void> {
 		try {
-			this.points = await this.semanticIndex.buildProjection(this.mode, this.dimensions, this.projectionScope);
+			this.points = await this.semanticIndex.buildProjection(this.dimensions, this.projectionScope);
 			this.renderGraph();
 			if (forceNotice) {
-				new Notice(`Updated ${this.projectionScope} ${this.mode.toUpperCase()} ${this.dimensions}D embedding view.`);
+				new Notice(`Updated ${this.projectionScope} PCA ${this.dimensions}D embedding view.`);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "Projection failed";
@@ -289,7 +240,7 @@ export class EmbeddingExplorerModal extends Modal {
 			.graphData({ nodes, links });
 
 		this.summaryEl.createDiv({
-			text: `${this.points.length} ${this.projectionScope} projected with ${this.mode.toUpperCase()} in ${this.dimensions}D. Click a node to open the note.`,
+			text: `${this.points.length} ${this.projectionScope} projected with PCA in ${this.dimensions}D. Click a node to open the note.`,
 			cls: "semantic-auto-linker-embedding-summary-main",
 		});
 		this.summaryEl.createDiv({ text: `${links.length} neighborhood links` });
@@ -301,7 +252,7 @@ export class EmbeddingExplorerModal extends Modal {
 						? "Colored by top-level folder"
 						: "Neutral node colors",
 		});
-		this.summaryEl.createDiv({ text: this.mode === "pca" ? "Global structure preserved" : "Local neighborhoods emphasized" });
+		this.summaryEl.createDiv({ text: "Global structure preserved" });
 		if (this.dimensions === 3) {
 			renderSeparationMatrixAccordion(this.summaryEl, this.points);
 		}
@@ -341,17 +292,6 @@ export class EmbeddingExplorerModal extends Modal {
 			this.labelFrame = window.requestAnimationFrame(tick);
 		};
 		this.labelFrame = window.requestAnimationFrame(tick);
-	}
-
-	private updateProjectionSettingsVisibility(): void {
-		if (!this.projectionSettingsEl) {
-			return;
-		}
-		this.projectionSettingsEl.setCssProps({ display: "" });
-		const tsneRows = this.projectionSettingsEl.querySelectorAll<HTMLElement>(".semantic-auto-linker-embedding-setting-tsne");
-		tsneRows.forEach((row) => {
-			row.setCssProps({ display: this.mode === "tsne" ? "" : "none" });
-		});
 	}
 
 	private fitCloser(durationMs: number): void {

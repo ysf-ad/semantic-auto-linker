@@ -1,47 +1,35 @@
-declare module "tsne-js" {
-	interface TSNEOptions {
-		dim?: number;
-		perplexity?: number;
-		earlyExaggeration?: number;
-		learningRate?: number;
-		nIter?: number;
-		metric?: string;
-	}
-
-	interface TSNEInitOptions {
-		data: number[][];
-		type?: "dense" | "sparse";
-	}
-
-	export default class TSNE {
-		constructor(options?: TSNEOptions);
-		init(options: TSNEInitOptions): void;
-		run(): [number, number];
-		getOutput(): number[][];
-		getOutputScaled(): number[][];
-	}
-}
-
-declare module "three-spritetext" {
-	import { Object3D, Vector3 } from "three";
-
-	export default class SpriteText extends Object3D {
-		constructor(text?: string, textHeight?: number, color?: string);
-		text: string;
-		textHeight: number;
-		color: string;
-		backgroundColor: string;
-		padding: number;
-		position: Vector3;
-	}
-}
-
 declare module "d3-force-3d" {
-	export function forceCenter(x?: number, y?: number, z?: number): unknown;
-	export function forceManyBody(): {
-		strength(value: number): unknown;
-	};
-	export function forceRadial(radius?: number, x?: number, y?: number, z?: number): {
-		strength(value: number): unknown;
-	};
+	export interface SimulationNodeDatum {
+		x?: number;
+		y?: number;
+		z?: number;
+		vx?: number;
+		vy?: number;
+		vz?: number;
+		fx?: number | null;
+		fy?: number | null;
+		fz?: number | null;
+		index?: number;
+	}
+
+	export interface SimulationLinkDatum<NodeDatum extends SimulationNodeDatum> {
+		source: NodeDatum | string | number;
+		target: NodeDatum | string | number;
+		index?: number;
+	}
+
+	export interface Force<NodeDatum extends SimulationNodeDatum, LinkDatum extends SimulationLinkDatum<NodeDatum> = SimulationLinkDatum<NodeDatum>> {
+		(alpha: number): void;
+		initialize?(nodes: NodeDatum[], random?: () => number): void;
+		strength(strength: number): this;
+		links?(links: LinkDatum[]): this;
+		id?(id: (node: NodeDatum) => string): this;
+	}
+
+	export function forceCenter<NodeDatum extends SimulationNodeDatum>(x?: number, y?: number, z?: number): Force<NodeDatum>;
+	export function forceLink<NodeDatum extends SimulationNodeDatum, LinkDatum extends SimulationLinkDatum<NodeDatum> = SimulationLinkDatum<NodeDatum>>(
+		links?: LinkDatum[],
+	): Force<NodeDatum, LinkDatum>;
+	export function forceManyBody<NodeDatum extends SimulationNodeDatum>(): Force<NodeDatum>;
+	export function forceRadial<NodeDatum extends SimulationNodeDatum>(radius?: number, x?: number, y?: number, z?: number): Force<NodeDatum>;
 }

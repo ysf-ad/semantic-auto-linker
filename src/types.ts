@@ -15,8 +15,6 @@ export interface SemanticAutoLinkerSettings {
 	semanticSummaryLength: number;
 	semanticOllamaBaseUrl: string;
 	semanticOllamaModel: string;
-	semanticProjectionPerplexity: number;
-	semanticProjectionIterations: number;
 	semanticProjectionMetric: "cosine" | "euclidean";
 	semanticExplorerLabelDistance: number;
 	semanticDisplayThreshold: number;

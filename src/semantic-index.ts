@@ -333,7 +333,6 @@ export class SemanticIndex {
 	}
 
 	async buildProjection(
-		method: "pca" | "tsne",
 		dimensions: 2 | 3 = 2,
 		scope: "notes" | "concepts" = "notes",
 	): Promise<SemanticProjectionPoint[]> {
@@ -366,36 +365,6 @@ export class SemanticIndex {
 
 		if (projectable.length < 2) {
 			return [];
-		}
-
-		if (method === "tsne") {
-			const { default: TSNE } = await import("tsne-js");
-			const model = new TSNE({
-				dim: dimensions,
-				perplexity: Math.max(5, Math.min(40, this.settings.semanticProjectionPerplexity)),
-				earlyExaggeration: 4,
-				learningRate: 100,
-				nIter: this.settings.semanticProjectionIterations,
-				metric: "euclidean",
-			});
-			model.init({
-				data: projectable.map((item) => item.embedding),
-				type: "dense",
-			});
-			model.run();
-				const output = model.getOutputScaled();
-			return output.map((point, index) => ({
-				id: projectable[index]?.id ?? "",
-				path: projectable[index]?.path ?? "",
-				title: projectable[index]?.title ?? "",
-				parentTitle: projectable[index]?.parentTitle ?? projectable[index]?.title ?? "",
-				kind: projectable[index]?.kind ?? "note",
-				tags: projectable[index]?.tags ?? [],
-				x: point[0] ?? 0,
-				y: point[1] ?? 0,
-				z: dimensions === 3 ? (point[2] ?? 0) : 0,
-				region: projectable[index]?.region ?? "Root",
-			})).filter((point) => point.id && point.path);
 		}
 
 		const { PCA } = await import("ml-pca");

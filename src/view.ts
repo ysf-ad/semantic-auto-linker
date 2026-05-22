@@ -26,7 +26,7 @@ export class SemanticAutoLinkerView extends ItemView {
 	}
 
 	getIcon(): string {
-		return "links-coming-in";
+		return "git-branch";
 	}
 
 	async onOpen(): Promise<void> {

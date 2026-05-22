@@ -21,7 +21,7 @@ It focuses on two things:
   - avoid duplicate link targets in the same note
 - Deterministic matching for titles, aliases, normalization, and acronyms
 - Optional semantic retrieval with a local Ollama embedding model
-- Embedding explorer with PCA and t-SNE note/concept views
+- Embedding explorer with PCA note/concept views
 - Persistent whole-vault review state with background refresh when notes change
 
 ## Semantic mode

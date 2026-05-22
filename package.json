@@ -1,6 +1,6 @@
 {
 	"name": "semantic-auto-linker",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Safe and reviewable auto-linking for Obsidian",
 	"main": "main.js",
 	"type": "module",
@@ -36,7 +36,6 @@
 		"ml-pca": "^4.1.1",
 		"obsidian": "latest",
 		"three": "^0.150.1",
-		"three-spritetext": "^1.10.0",
-		"tsne-js": "^1.0.3"
+		"three-spritetext": "^1.10.0"
 	}
 }
