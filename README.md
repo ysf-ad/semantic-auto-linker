@@ -10,6 +10,7 @@ It focuses on two things:
 
 - Analyze the current note and review suggested inline `[[links]]`
 - Analyze the whole vault and review suggestions before applying
+- Exclude noisy target notes directly from review rows or settings
 - Switch insertion mode per review:
   - `Inline` updates matched text in place
   - `Footer` writes accepted targets into a footer section

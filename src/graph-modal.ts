@@ -48,10 +48,10 @@ export class GraphPreviewPanel {
 		this.render();
 	}
 
-	updateAnalysis(analysis: VaultAnalysisResult): void {
+	updateAnalysis(analysis: VaultAnalysisResult, options: { refit?: boolean } = {}): void {
 		this.analysis = analysis;
 		if (this.graph) {
-			this.refreshGraphData({ preserveLayout: true, refit: false });
+			this.refreshGraphData({ preserveLayout: true, refit: options.refit ?? false });
 		}
 	}
 

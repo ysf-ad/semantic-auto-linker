@@ -9,10 +9,16 @@ export function buildSeeAlsoSuggestions(
 ): RelatedNoteSuggestion[] {
 	const currentTokens = new Set(current.titleTokens);
 	const currentTags = new Set(current.tags);
+	const excludedTargetFiles = settings.excludedTargetFiles ?? [];
 
 	return index
 		.getAll()
-		.filter((note) => note.path !== current.path && !linkedTargets.has(note.linkTarget) && !linkedTargets.has(note.path))
+		.filter((note) =>
+			note.path !== current.path
+			&& !excludedTargetFiles.includes(note.path)
+			&& !linkedTargets.has(note.linkTarget)
+			&& !linkedTargets.has(note.path),
+		)
 		.map((note) => {
 			const sharedTokens = note.titleTokens.filter((token) => currentTokens.has(token)).length;
 			const sharedTags = note.tags.filter((tag) => currentTags.has(tag)).length;

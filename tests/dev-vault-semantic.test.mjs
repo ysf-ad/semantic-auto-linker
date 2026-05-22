@@ -236,6 +236,81 @@ test("exact title replacements use display title instead of full path", async ()
 	assert.equal(aliasAnalysis.suggestions[0]?.replacement, "[[Research/ML/Embeddings|dense vectors]]");
 });
 
+test("excluded target files are not suggested as deterministic matches", async () => {
+	const sourceRecord = {
+		file: {
+			path: "Scratch.md",
+			fullPath: "Scratch.md",
+			basename: "Scratch",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Scratch.md",
+		linkTarget: "Scratch",
+		title: "Scratch",
+		aliases: [],
+		normalizedTitle: "scratch",
+		titleTokens: ["scratch"],
+		lookupKeys: ["scratch"],
+		tags: [],
+	};
+	const noisyTargetRecord = {
+		file: {
+			path: "Files.md",
+			fullPath: "Files.md",
+			basename: "Files",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Files.md",
+		linkTarget: "Files",
+		title: "Files",
+		aliases: ["file"],
+		normalizedTitle: "file",
+		titleTokens: ["file"],
+		lookupKeys: ["file"],
+		tags: [],
+	};
+	const index = {
+		getAll() {
+			return [sourceRecord, noisyTargetRecord];
+		},
+	};
+	const settings = {
+		firstOccurrenceOnly: true,
+		maxLinksPerNote: 12,
+		excludedFolders: [],
+		excludedFiles: [],
+		excludedTargetFiles: ["Files.md"],
+		enableAliasMatching: true,
+		skipHeadings: true,
+		seeAlsoHeading: "See also",
+		seeAlsoCount: 5,
+		semanticMode: false,
+		semanticProviderId: "ollama",
+		semanticTopK: 8,
+		semanticSummaryLength: 280,
+		semanticOllamaBaseUrl: "http://127.0.0.1:11434",
+		semanticOllamaModel: "embeddinggemma",
+		semanticProjectionMetric: "cosine",
+		semanticExplorerLabelDistance: 620,
+		semanticDisplayThreshold: 0.3,
+		semanticAcceptanceThreshold: 0.6,
+		autoRefreshEnabled: true,
+		autoRefreshMinutes: 60,
+	};
+
+	const analysis = await analyzeNoteContent(
+		sourceRecord,
+		"Files and file references should not all become noisy links.",
+		index,
+		settings,
+		undefined,
+	);
+
+	assert.equal(analysis.suggestions.length, 0);
+});
+
 test("current-note analysis falls back to first-name matching for person-title notes without explicit aliases", async () => {
 	const sourceRecord = {
 		file: {

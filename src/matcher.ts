@@ -21,15 +21,16 @@ export async function analyzeNoteContent(
 	const protectedRanges = getProtectedRanges(source, settings.skipHeadings);
 	const existingTargets = new Set(extractExistingTargets(source));
 	const usedTargets = new Set(existingTargets);
-	const candidates = buildCandidateMap(index, file.path, settings.enableAliasMatching);
-	const acronymCandidates = buildAcronymCandidateMap(index, file.path, settings.enableAliasMatching);
+	const excludedTargetPaths = new Set(settings.excludedTargetFiles ?? []);
+	const candidates = buildCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths);
+	const acronymCandidates = buildAcronymCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths);
 	const tokens = indexTokens(source);
 	const suggestions: LinkSuggestion[] = [];
 	const occupied = new Array<boolean>(tokens.length).fill(false);
 	const displaySuggestionLimit = settings.maxLinksPerNote > 0
 		? Math.max(settings.maxLinksPerNote * 3, settings.maxLinksPerNote + 8)
 		: Number.POSITIVE_INFINITY;
-	const semanticSingleWordHints = buildSemanticSingleWordHints(index, file.path);
+	const semanticSingleWordHints = buildSemanticSingleWordHints(index, file.path, excludedTargetPaths);
 
 	const maxTokenLength = Math.max(...candidates.keys(), 1);
 	const selectionStart = selection?.start ?? 0;
@@ -112,6 +113,7 @@ export async function analyzeNoteContent(
 				: [];
 			const candidateTargetPaths = new Set(
 				documentMatches
+					.filter((match) => !excludedTargetPaths.has(match.targetPath))
 					.filter((match) => match.score >= Math.max(settings.semanticDisplayThreshold, 0.42))
 					.slice(0, Math.max(settings.semanticTopK, 6))
 					.map((match) => match.targetPath),
@@ -139,7 +141,8 @@ export async function analyzeNoteContent(
 					score: match.score + (candidateTargetPaths.has(match.targetPath) ? 0.08 : 0),
 				}))
 				.filter((match) =>
-					match.score >= settings.semanticDisplayThreshold
+					!excludedTargetPaths.has(match.targetPath)
+					&& match.score >= settings.semanticDisplayThreshold
 					&& normalizeText(span.text) !== normalizeText(match.targetTitle),
 				);
 			const best = rankedMatches[0];
@@ -285,11 +288,16 @@ function getSemanticSuggestionBudget(path: string, title: string): number {
 	return Number.POSITIVE_INFINITY;
 }
 
-function buildCandidateMap(index: VaultIndex, currentPath: string, includeAliases: boolean): Map<number, Map<string, PhraseCandidate[]>> {
+function buildCandidateMap(
+	index: VaultIndex,
+	currentPath: string,
+	includeAliases: boolean,
+	excludedTargetPaths: Set<string>,
+): Map<number, Map<string, PhraseCandidate[]>> {
 	const map = new Map<number, Map<string, PhraseCandidate[]>>();
 
 	for (const note of index.getAll()) {
-		if (note.path === currentPath) {
+		if (note.path === currentPath || excludedTargetPaths.has(note.path)) {
 			continue;
 		}
 
@@ -318,11 +326,16 @@ function buildCandidateMap(index: VaultIndex, currentPath: string, includeAliase
 	return map;
 }
 
-function buildAcronymCandidateMap(index: VaultIndex, currentPath: string, includeAliases: boolean): Map<string, PhraseCandidate[]> {
+function buildAcronymCandidateMap(
+	index: VaultIndex,
+	currentPath: string,
+	includeAliases: boolean,
+	excludedTargetPaths: Set<string>,
+): Map<string, PhraseCandidate[]> {
 	const map = new Map<string, PhraseCandidate[]>();
 
 	for (const note of index.getAll()) {
-		if (note.path === currentPath) {
+		if (note.path === currentPath || excludedTargetPaths.has(note.path)) {
 			continue;
 		}
 
@@ -714,10 +727,10 @@ function hasInternalStopWords(normalized: string): boolean {
 	return parts.slice(1, -1).some((part) => STOP_WORDS.has(part) || LOW_SIGNAL_PREFIX_WORDS.has(part));
 }
 
-function buildSemanticSingleWordHints(index: VaultIndex, currentPath: string): Set<string> {
+function buildSemanticSingleWordHints(index: VaultIndex, currentPath: string, excludedTargetPaths: Set<string>): Set<string> {
 	const hints = new Set<string>();
 	for (const note of index.getAll()) {
-		if (note.path === currentPath || !looksLikePersonRecord(note)) {
+		if (note.path === currentPath || excludedTargetPaths.has(note.path) || !looksLikePersonRecord(note)) {
 			continue;
 		}
 		const firstToken = note.titleTokens[0];

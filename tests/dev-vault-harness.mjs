@@ -189,6 +189,7 @@ function defaultSettings() {
 		maxLinksPerNote: 12,
 		excludedFolders: [],
 		excludedFiles: [],
+		excludedTargetFiles: [],
 		enableAliasMatching: true,
 		skipHeadings: true,
 		seeAlsoHeading: "See also",

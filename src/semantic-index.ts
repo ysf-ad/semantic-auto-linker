@@ -305,6 +305,7 @@ export class SemanticIndex {
 				record.path !== currentPath
 				&& record.providerId === providerId
 				&& record.embedding
+				&& !this.isExcludedTarget(record.path)
 				&& !linkedTargets.has(record.path)
 				&& !linkedTargets.has(record.path.replace(/\.md$/i, ""))
 				&& !linkedTargets.has(record.title),
@@ -419,6 +420,7 @@ export class SemanticIndex {
 			result.set(
 				query,
 				cachedMatches
+					.filter((match) => !this.isExcludedTarget(match.targetPath))
 					.filter((match) => !allowedTargetPaths || allowedTargetPaths.has(match.targetPath))
 					.filter((match) => match.targetPath !== currentPath)
 					.slice(0, Math.max(1, limit)),
@@ -655,7 +657,7 @@ export class SemanticIndex {
 		}
 
 		return [...this.records.values()]
-			.filter((record) => record.path !== currentPath)
+			.filter((record) => record.path !== currentPath && !this.isExcludedTarget(record.path))
 			.map((record) => ({
 				record,
 				score: sparseScore(queryTerms, record),
@@ -670,6 +672,10 @@ export class SemanticIndex {
 				targetLink: record.path.replace(/\.md$/i, ""),
 				score,
 			}));
+	}
+
+	private isExcludedTarget(path: string): boolean {
+		return (this.settings.excludedTargetFiles ?? []).includes(path);
 	}
 }
 

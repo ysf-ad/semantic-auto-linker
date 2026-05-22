@@ -9,6 +9,7 @@ type ApplyHandler = (payload: {
 	mode: ReviewInsertionMode;
 	useDisplayTitle: boolean;
 }) => Promise<void>;
+type ExcludeTargetHandler = (targetPath: string, targetTitle: string) => Promise<void>;
 type VaultFilterMode = "all" | "semantic" | "deterministic" | "accepted" | "unchecked";
 type VaultGroupSortMode = "name" | "most-suggestions" | "highest-confidence" | "lowest-confidence";
 type VaultSuggestionSortMode = "document" | "highest-confidence" | "lowest-confidence";
@@ -16,15 +17,23 @@ type VaultSuggestionSortMode = "document" | "highest-confidence" | "lowest-confi
 export class LinkReviewModal extends Modal {
 	private analysis: AnalysisResult;
 	private onApply: ApplyHandler;
+	private onExcludeTarget: ExcludeTargetHandler | null;
 	private settings: SemanticAutoLinkerSettings;
 	private insertionMode: ReviewInsertionMode = "inline";
 	private useDisplayTitle = true;
 
-	constructor(app: Modal["app"], analysis: AnalysisResult, settings: SemanticAutoLinkerSettings, onApply: ApplyHandler) {
+	constructor(
+		app: Modal["app"],
+		analysis: AnalysisResult,
+		settings: SemanticAutoLinkerSettings,
+		onApply: ApplyHandler,
+		onExcludeTarget: ExcludeTargetHandler | null = null,
+	) {
 		super(app);
 		this.analysis = analysis;
 		this.settings = settings;
 		this.onApply = onApply;
+		this.onExcludeTarget = onExcludeTarget;
 	}
 
 	onOpen(): void {
@@ -101,29 +110,15 @@ export class LinkReviewModal extends Modal {
 
 		const listEl = contentEl.createDiv({ cls: "semantic-auto-linker-list" });
 		for (const suggestion of this.analysis.suggestions) {
-			const row = listEl.createDiv({ cls: "semantic-auto-linker-row" });
-			row.dataset.suggestionId = suggestion.id;
-
-			const checkbox = row.createEl("input", { type: "checkbox" });
-			checkbox.checked = suggestion.accepted;
-			checkbox.onchange = () => {
-				suggestion.accepted = checkbox.checked;
-			};
-
-			const body = row.createDiv({ cls: "semantic-auto-linker-row-body" });
-			body.createDiv({
-				text: `"${suggestion.matchedText}" -> [[${suggestion.targetTitle}]]`,
-				cls: "semantic-auto-linker-row-title",
-			});
-			body.createDiv({
-				text: `${suggestion.reason} | ${(suggestion.confidence * 100).toFixed(0)}%`,
-				cls: "semantic-auto-linker-row-meta",
-			});
-			const details = body.createEl("details", { cls: "semantic-auto-linker-row-details" });
-			details.createEl("summary", { text: "Preview" });
-			details.createDiv({
-				text: suggestion.context,
-				cls: "semantic-auto-linker-row-context",
+			createSuggestionReviewRow(listEl, suggestion, {
+				meta: `${suggestion.reason} | ${(suggestion.confidence * 100).toFixed(0)}%`,
+				contextLabel: "Preview",
+				onToggle: () => undefined,
+				onExcludeTarget: this.onExcludeTarget
+					? async () => {
+						await this.excludeTarget(suggestion.targetPath, suggestion.targetTitle);
+					}
+					: null,
 			});
 		}
 	}
@@ -142,15 +137,23 @@ export class LinkReviewModal extends Modal {
 			input.checked = suggestion.accepted;
 		});
 	}
+
+	private async excludeTarget(targetPath: string, targetTitle: string): Promise<void> {
+		await this.onExcludeTarget?.(targetPath, targetTitle);
+		this.analysis.suggestions = this.analysis.suggestions.filter((suggestion) => suggestion.targetPath !== targetPath);
+		this.onOpen();
+	}
 }
 
 export class VaultReviewModal extends Modal {
 	private analysis: VaultAnalysisResult | null;
 	private onApply: (analysis: VaultAnalysisResult, mode: ReviewInsertionMode, useDisplayTitle: boolean) => Promise<void>;
+	private onExcludeTarget: ExcludeTargetHandler | null;
 	private onChange: () => void;
 	private settings: SemanticAutoLinkerSettings;
 	private graphPanel: GraphPreviewPanel | null = null;
 	private graphHostEl: HTMLElement | null = null;
+	private graphPlaceholderEl: HTMLElement | null = null;
 	private summaryPrimaryEl: HTMLElement | null = null;
 	private summarySecondaryEl: HTMLElement | null = null;
 	private progressShellEl: HTMLElement | null = null;
@@ -158,6 +161,7 @@ export class VaultReviewModal extends Modal {
 	private progressCopyEl: HTMLElement | null = null;
 	private listEl: HTMLElement | null = null;
 	private rightPaneEl: HTMLElement | null = null;
+	private targetSummaryEl: HTMLElement | null = null;
 	private filterMode: VaultFilterMode = "all";
 	private groupSortMode: VaultGroupSortMode = "name";
 	private suggestionSortMode: VaultSuggestionSortMode = "document";
@@ -168,13 +172,22 @@ export class VaultReviewModal extends Modal {
 	private insertionMode: ReviewInsertionMode = "inline";
 	private useDisplayTitle = true;
 
-	constructor(app: Modal["app"], analysis: VaultAnalysisResult | null, settings: SemanticAutoLinkerSettings, onApply: (analysis: VaultAnalysisResult, mode: ReviewInsertionMode, useDisplayTitle: boolean) => Promise<void>, onChange: () => void, onClosed?: () => void) {
+	constructor(
+		app: Modal["app"],
+		analysis: VaultAnalysisResult | null,
+		settings: SemanticAutoLinkerSettings,
+		onApply: (analysis: VaultAnalysisResult, mode: ReviewInsertionMode, useDisplayTitle: boolean) => Promise<void>,
+		onChange: () => void,
+		onClosed?: () => void,
+		onExcludeTarget: ExcludeTargetHandler | null = null,
+	) {
 		super(app);
 		this.analysis = analysis;
 		this.settings = settings;
 		this.onApply = onApply;
 		this.onChange = onChange;
 		this.onClosed = onClosed;
+		this.onExcludeTarget = onExcludeTarget;
 	}
 
 	onOpen(): void {
@@ -206,7 +219,7 @@ export class VaultReviewModal extends Modal {
 		if (this.analysis) {
 			this.graphPanel = new GraphPreviewPanel(this.app, this.graphHostEl, this.analysis, "after");
 		} else {
-			this.graphHostEl.createDiv({
+			this.graphPlaceholderEl = this.graphHostEl.createDiv({
 				text: "Building whole-vault review and graph preview...",
 				cls: "semantic-auto-linker-empty-state",
 			});
@@ -261,6 +274,7 @@ export class VaultReviewModal extends Modal {
 		};
 
 		this.renderControls(controlsRow);
+		this.targetSummaryEl = rightPane.createDiv({ cls: "semantic-auto-linker-target-summary" });
 		this.listEl = rightPane.createDiv({ cls: "semantic-auto-linker-list semantic-auto-linker-vault-results" });
 		this.renderResultList();
 	}
@@ -270,6 +284,8 @@ export class VaultReviewModal extends Modal {
 		this.graphPanel?.destroy();
 		this.graphPanel = null;
 		this.graphHostEl = null;
+		this.graphPlaceholderEl = null;
+		this.targetSummaryEl = null;
 		this.contentEl.empty();
 		this.modalEl.setCssProps({
 			width: "",
@@ -398,6 +414,7 @@ export class VaultReviewModal extends Modal {
 
 		this.listEl.empty();
 		if (!this.analysis) {
+			this.renderTargetSummary();
 			this.listEl.createDiv({ cls: "semantic-auto-linker-loading-block" });
 			this.listEl.createEl("p", {
 				text: "Reading notes, matching links, and preparing the graph preview...",
@@ -406,6 +423,7 @@ export class VaultReviewModal extends Modal {
 			return;
 		}
 		this.updateControlVisibility();
+		this.renderTargetSummary();
 		if (this.suggestionSortMode !== "document") {
 			const flatSuggestions = this.getVisibleSuggestionsFlat();
 			this.renderSummary(this.analysis.graphMetrics, flatSuggestions);
@@ -419,34 +437,15 @@ export class VaultReviewModal extends Modal {
 
 			const rows = this.listEl.createDiv({ cls: "semantic-auto-linker-flat-list" });
 			for (const entry of flatSuggestions) {
-				const row = rows.createDiv({ cls: "semantic-auto-linker-row" });
-				row.dataset.suggestionId = entry.suggestion.id;
-
-				const checkbox = row.createEl("input", { type: "checkbox" });
-				checkbox.checked = entry.suggestion.accepted;
-				checkbox.onchange = () => {
-					entry.suggestion.accepted = checkbox.checked;
-					this.onChange();
-					if (this.analysis) {
-						this.graphPanel?.updateAnalysis(this.analysis);
-					}
-					this.renderResultList();
-				};
-
-				const body = row.createDiv({ cls: "semantic-auto-linker-row-body" });
-				body.createDiv({
-					text: `"${entry.suggestion.matchedText}" -> [[${entry.suggestion.targetTitle}]]`,
-					cls: "semantic-auto-linker-row-title",
-				});
-				body.createDiv({
-					text: `${entry.result.file.basename} | ${entry.suggestion.reason} | ${(entry.suggestion.confidence * 100).toFixed(0)}%`,
-					cls: "semantic-auto-linker-row-meta",
-				});
-				const details = body.createEl("details", { cls: "semantic-auto-linker-row-details" });
-				details.createEl("summary", { text: "Context" });
-				details.createDiv({
-					text: entry.suggestion.context,
-					cls: "semantic-auto-linker-row-context",
+				createSuggestionReviewRow(rows, entry.suggestion, {
+					meta: `${entry.result.file.basename} | ${entry.suggestion.reason} | ${(entry.suggestion.confidence * 100).toFixed(0)}%`,
+					contextLabel: "Context",
+					onToggle: () => this.handleSuggestionStateChange(),
+					onExcludeTarget: this.onExcludeTarget
+						? async () => {
+							await this.excludeTarget(entry.suggestion.targetPath, entry.suggestion.targetTitle);
+						}
+						: null,
 				});
 			}
 			return;
@@ -483,34 +482,15 @@ export class VaultReviewModal extends Modal {
 
 			const rows = section.createDiv({ cls: "semantic-auto-linker-group-rows" });
 			for (const suggestion of group.suggestions) {
-				const row = rows.createDiv({ cls: "semantic-auto-linker-row" });
-				row.dataset.suggestionId = suggestion.id;
-
-				const checkbox = row.createEl("input", { type: "checkbox" });
-				checkbox.checked = suggestion.accepted;
-				checkbox.onchange = () => {
-					suggestion.accepted = checkbox.checked;
-					this.onChange();
-					if (this.analysis) {
-						this.graphPanel?.updateAnalysis(this.analysis);
-					}
-					this.renderResultList();
-				};
-
-				const body = row.createDiv({ cls: "semantic-auto-linker-row-body" });
-				body.createDiv({
-					text: `"${suggestion.matchedText}" -> [[${suggestion.targetTitle}]]`,
-					cls: "semantic-auto-linker-row-title",
-				});
-				body.createDiv({
-					text: `${suggestion.reason} | ${(suggestion.confidence * 100).toFixed(0)}%`,
-					cls: "semantic-auto-linker-row-meta",
-				});
-				const details = body.createEl("details", { cls: "semantic-auto-linker-row-details" });
-				details.createEl("summary", { text: "Context" });
-				details.createDiv({
-					text: suggestion.context,
-					cls: "semantic-auto-linker-row-context",
+				createSuggestionReviewRow(rows, suggestion, {
+					meta: `${suggestion.reason} | ${(suggestion.confidence * 100).toFixed(0)}%`,
+					contextLabel: "Context",
+					onToggle: () => this.handleSuggestionStateChange(),
+					onExcludeTarget: this.onExcludeTarget
+						? async () => {
+							await this.excludeTarget(suggestion.targetPath, suggestion.targetTitle);
+						}
+						: null,
 				});
 			}
 		}
@@ -627,6 +607,41 @@ export class VaultReviewModal extends Modal {
 		);
 	}
 
+	private renderTargetSummary(): void {
+		if (!this.targetSummaryEl) {
+			return;
+		}
+		this.targetSummaryEl.empty();
+		if (!this.analysis) {
+			this.targetSummaryEl.setCssProps({ display: "none" });
+			return;
+		}
+		const targets = getFrequentTargets(this.analysis);
+		if (targets.length === 0) {
+			this.targetSummaryEl.setCssProps({ display: "none" });
+			return;
+		}
+		this.targetSummaryEl.setCssProps({ display: "" });
+		this.targetSummaryEl.createSpan({ text: "Frequent targets", cls: "semantic-auto-linker-target-summary-label" });
+		const list = this.targetSummaryEl.createDiv({ cls: "semantic-auto-linker-target-summary-list" });
+		for (const target of targets.slice(0, 8)) {
+			const button = list.createEl("button", {
+				cls: "semantic-auto-linker-target-summary-button",
+				attr: {
+					type: "button",
+					"aria-label": `Exclude ${target.title} from matching`,
+				},
+			});
+			setIcon(button.createSpan(), "ban");
+			button.createSpan({ text: target.title, cls: "semantic-auto-linker-target-summary-title" });
+			button.createSpan({ text: String(target.count), cls: "semantic-auto-linker-target-summary-count" });
+			button.title = `Exclude ${target.title} from matching`;
+			button.onclick = () => {
+				void this.excludeTarget(target.path, target.title);
+			};
+		}
+	}
+
 	updateProgress(progress: VaultAnalysisJobState): void {
 		if (!this.progressShellEl || !this.progressFillEl || !this.progressCopyEl) {
 			return;
@@ -650,14 +665,39 @@ export class VaultReviewModal extends Modal {
 		if (!this.rightPaneEl) {
 			return;
 		}
-		if (!this.graphPanel) {
-			if (this.graphHostEl) {
-				this.graphHostEl.empty();
-				this.graphPanel = new GraphPreviewPanel(this.app, this.graphHostEl, analysis, "after");
-			}
-		} else {
-			this.graphPanel.updateAnalysis(analysis);
+		this.updateGraphPreview(analysis, true);
+		this.renderResultList();
+	}
+
+	updateGraphPreview(analysis: VaultAnalysisResult, refit = false): void {
+		if (!this.graphHostEl) {
+			return;
 		}
+		if (!this.graphPanel) {
+			this.graphHostEl.empty();
+			this.graphPlaceholderEl = null;
+			this.graphPanel = new GraphPreviewPanel(this.app, this.graphHostEl, analysis, "after");
+			return;
+		}
+		this.graphPanel.updateAnalysis(analysis, { refit });
+	}
+
+	private handleSuggestionStateChange(): void {
+		this.onChange();
+		if (this.analysis) {
+			this.graphPanel?.updateAnalysis(this.analysis);
+		}
+		this.renderResultList();
+	}
+
+	private async excludeTarget(targetPath: string, targetTitle: string): Promise<void> {
+		await this.onExcludeTarget?.(targetPath, targetTitle);
+		if (!this.analysis) {
+			return;
+		}
+		removeTargetSuggestions(this.analysis, targetPath);
+		this.onChange();
+		this.graphPanel?.updateAnalysis(this.analysis);
 		this.renderResultList();
 	}
 
@@ -678,6 +718,98 @@ function applyAcceptanceThreshold(suggestions: LinkSuggestion[], threshold: numb
 			? suggestion.confidence >= threshold
 			: true;
 	}
+}
+
+function createSuggestionReviewRow(
+	containerEl: HTMLElement,
+	suggestion: LinkSuggestion,
+	options: {
+		meta: string;
+		contextLabel: string;
+		onToggle: () => void;
+		onExcludeTarget: (() => Promise<void>) | null;
+	},
+): void {
+	const row = containerEl.createDiv({ cls: "semantic-auto-linker-row" });
+	row.dataset.suggestionId = suggestion.id;
+
+	const checkbox = row.createEl("input", { type: "checkbox" });
+	checkbox.checked = suggestion.accepted;
+	checkbox.onchange = () => {
+		suggestion.accepted = checkbox.checked;
+		options.onToggle();
+	};
+
+	const body = row.createDiv({ cls: "semantic-auto-linker-row-body" });
+	body.createDiv({
+		text: `"${suggestion.matchedText}" -> [[${suggestion.targetTitle}]]`,
+		cls: "semantic-auto-linker-row-title",
+	});
+	body.createDiv({
+		text: options.meta,
+		cls: "semantic-auto-linker-row-meta",
+	});
+	const details = body.createEl("details", { cls: "semantic-auto-linker-row-details" });
+	details.createEl("summary", { text: options.contextLabel });
+	details.createDiv({
+		text: suggestion.context,
+		cls: "semantic-auto-linker-row-context",
+	});
+
+	if (!options.onExcludeTarget) {
+		return;
+	}
+	const actions = row.createDiv({ cls: "semantic-auto-linker-row-actions" });
+	const excludeButton = actions.createEl("button", {
+		cls: "semantic-auto-linker-row-action-button",
+		attr: {
+			type: "button",
+			"aria-label": `Exclude ${suggestion.targetTitle} from matching`,
+		},
+	});
+	setIcon(excludeButton.createSpan(), "ban");
+	excludeButton.createSpan({ text: "Exclude target" });
+	excludeButton.title = `Stop suggesting links to ${suggestion.targetTitle}`;
+	excludeButton.onclick = (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		void options.onExcludeTarget?.();
+	};
+}
+
+function removeTargetSuggestions(analysis: VaultAnalysisResult, targetPath: string): number {
+	let removedCount = 0;
+	analysis.results = analysis.results
+		.map((result) => {
+			const suggestions = result.suggestions.filter((suggestion) => {
+				const keep = suggestion.targetPath !== targetPath;
+				if (!keep) {
+					removedCount += 1;
+				}
+				return keep;
+			});
+			return { ...result, suggestions };
+		})
+		.filter((result) => result.suggestions.length > 0);
+	return removedCount;
+}
+
+function getFrequentTargets(analysis: VaultAnalysisResult): Array<{ path: string; title: string; count: number }> {
+	const byPath = new Map<string, { path: string; title: string; count: number }>();
+	for (const result of analysis.results) {
+		for (const suggestion of result.suggestions) {
+			const current = byPath.get(suggestion.targetPath) ?? {
+				path: suggestion.targetPath,
+				title: suggestion.targetTitle,
+				count: 0,
+			};
+			current.count += 1;
+			byPath.set(suggestion.targetPath, current);
+		}
+	}
+	return [...byPath.values()]
+		.filter((target) => target.count > 1)
+		.sort((left, right) => right.count - left.count || left.title.localeCompare(right.title));
 }
 
 function createThresholdAcceptMenu(

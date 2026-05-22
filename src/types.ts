@@ -5,6 +5,7 @@ export interface SemanticAutoLinkerSettings {
 	maxLinksPerNote: number;
 	excludedFolders: string[];
 	excludedFiles: string[];
+	excludedTargetFiles: string[];
 	enableAliasMatching: boolean;
 	skipHeadings: boolean;
 	seeAlsoHeading: string;
@@ -136,6 +137,7 @@ export interface VaultAnalysisRunProgress {
 	current: number;
 	total: number;
 	message: string;
+	preview?: VaultAnalysisResult;
 }
 
 export interface RelatedNoteSuggestion {

@@ -134,6 +134,34 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		this.refreshView();
 	}
 
+	async updateExcludedTargetFiles(paths: string[]): Promise<void> {
+		const nextPaths = normalizeVaultPathList(paths);
+		if (sameStringList(this.settings.excludedTargetFiles ?? [], nextPaths)) {
+			this.pruneExcludedTargetSuggestions();
+			this.scheduleViewRefresh();
+			return;
+		}
+		this.settings.excludedTargetFiles = nextPaths;
+		await this.saveSettings();
+		this.pruneExcludedTargetSuggestions();
+		this.scheduleViewRefresh();
+	}
+
+	async excludeTargetFromMatching(targetPath: string, targetTitle?: string): Promise<void> {
+		const normalizedPath = normalizeVaultPath(targetPath);
+		if (!normalizedPath) {
+			return;
+		}
+		const currentPaths = this.settings.excludedTargetFiles ?? [];
+		const previousCount = currentPaths.length;
+		await this.updateExcludedTargetFiles([...currentPaths, normalizedPath]);
+		const label = targetTitle?.trim() || normalizedPath.replace(/\.md$/i, "");
+		const alreadyExcluded = previousCount === this.settings.excludedTargetFiles.length;
+		new Notice(alreadyExcluded
+			? `${label} is already excluded from matching.`
+			: `Excluded ${label} from future match suggestions.`);
+	}
+
 	getIndexSize(): number {
 		return this.index.size;
 	}
@@ -556,6 +584,8 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 
 		new LinkReviewModal(this.app, analysis, this.settings, async ({ suggestions, mode, useDisplayTitle }) => {
 			await this.applyAnalysis(analysis, suggestions, undefined, mode, useDisplayTitle);
+		}, async (targetPath, targetTitle) => {
+			await this.excludeTargetFromMatching(targetPath, targetTitle);
 		}).open();
 	}
 
@@ -579,6 +609,8 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 
 		new LinkReviewModal(this.app, analysis, this.settings, async ({ suggestions, mode, useDisplayTitle }) => {
 			await this.applyAnalysis(analysis, suggestions, editor, mode, useDisplayTitle);
+		}, async (targetPath, targetTitle) => {
+			await this.excludeTargetFromMatching(targetPath, targetTitle);
 		}).open();
 	}
 
@@ -605,6 +637,9 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 					this.activeVaultReviewModal = null;
 				}
 			},
+			async (targetPath, targetTitle) => {
+				await this.excludeTargetFromMatching(targetPath, targetTitle);
+			},
 		);
 		this.activeVaultReviewModal = modal;
 		modal.open();
@@ -613,6 +648,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	}
 
 	private recomputeVaultAnalysisPreview(analysis: VaultAnalysisResult): void {
+		removeSuggestionsForTargets(analysis, new Set(this.settings.excludedTargetFiles ?? []));
 		recomputeVaultAnalysis(analysis, this.index.getAll());
 		this.lastVaultAnalysis = analysis;
 		this.analysisRevision = this.vaultRevision;
@@ -620,6 +656,17 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		this.schedulePluginDataSave();
 		this.refreshView();
 		this.activeVaultReviewModal?.updateAnalysis(analysis);
+	}
+
+	private pruneExcludedTargetSuggestions(): void {
+		if (!this.lastVaultAnalysis) {
+			return;
+		}
+		const removedCount = removeSuggestionsForTargets(this.lastVaultAnalysis, new Set(this.settings.excludedTargetFiles ?? []));
+		if (removedCount === 0) {
+			return;
+		}
+		this.recomputeVaultAnalysisPreview(this.lastVaultAnalysis);
 	}
 
 	private async applyVaultAnalysis(analysis: VaultAnalysisResult, mode: ReviewInsertionMode, useDisplayTitle: boolean): Promise<void> {
@@ -765,6 +812,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	private restorePersistedVaultAnalysis(): void {
 		this.lastVaultAnalysis = hydrateVaultAnalysis(this.app.vault, this.persistedVaultAnalysisSnapshot);
 		if (this.lastVaultAnalysis) {
+			removeSuggestionsForTargets(this.lastVaultAnalysis, new Set(this.settings.excludedTargetFiles ?? []));
 			recomputeVaultAnalysis(this.lastVaultAnalysis, this.index.getAll());
 			this.analysisRevision = this.persistedVaultAnalysisSnapshot?.revision ?? this.vaultRevision;
 		}
@@ -902,6 +950,10 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	}
 
 	private handleVaultAnalysisProgress(progress: VaultAnalysisRunProgress): void {
+		if (progress.preview) {
+			removeSuggestionsForTargets(progress.preview, new Set(this.settings.excludedTargetFiles ?? []));
+			this.activeVaultReviewModal?.updateGraphPreview(progress.preview, progress.stage !== "analyzing" || progress.current <= 3);
+		}
 		const records = Math.max(1, this.index.getAll().length);
 		const current = progress.stage === "reading"
 			? progress.current
@@ -1204,6 +1256,55 @@ function extractLinkedTargets(source: string): Set<string> {
 function buildSemanticStatusMessage(status: SemanticIndexStatus): string {
 	const availability = status.available ? "ready" : status.reason ?? "unavailable";
 	return `Semantic index: ${status.cachedCount}/${status.noteCount} cached with ${status.providerLabel} (${availability})`;
+}
+
+function normalizeVaultPath(value: string): string {
+	return value.trim().replace(/\\/g, "/");
+}
+
+function normalizeVaultPathList(paths: string[]): string[] {
+	const seen = new Set<string>();
+	const normalized: string[] = [];
+	for (const path of paths) {
+		const nextPath = normalizeVaultPath(path);
+		if (!nextPath || seen.has(nextPath)) {
+			continue;
+		}
+		seen.add(nextPath);
+		normalized.push(nextPath);
+	}
+	return normalized.sort((left, right) => left.localeCompare(right));
+}
+
+function sameStringList(left: string[], right: string[]): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+	return left.every((value, index) => value === right[index]);
+}
+
+function removeSuggestionsForTargets(analysis: VaultAnalysisResult, excludedTargetPaths: Set<string>): number {
+	if (excludedTargetPaths.size === 0) {
+		return 0;
+	}
+
+	let removedCount = 0;
+	analysis.results = analysis.results
+		.map((result) => {
+			const suggestions = result.suggestions.filter((suggestion) => {
+				const keep = !excludedTargetPaths.has(suggestion.targetPath);
+				if (!keep) {
+					removedCount += 1;
+				}
+				return keep;
+			});
+			return {
+				...result,
+				suggestions,
+			};
+		})
+		.filter((result) => result.suggestions.length > 0);
+	return removedCount;
 }
 
 function isPluginStorageDataShape(value: unknown): value is Partial<PluginStorageData & SemanticAutoLinkerSettings> {

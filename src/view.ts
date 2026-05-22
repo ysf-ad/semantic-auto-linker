@@ -281,6 +281,22 @@ function createRelatedRow(containerEl: HTMLElement, plugin: SemanticAutoLinkerPl
 		text: suggestion.context,
 		cls: "semantic-auto-linker-related-preview",
 	});
+	const actions = card.createDiv({ cls: "semantic-auto-linker-related-actions" });
+	const exclude = actions.createEl("button", {
+		cls: "semantic-auto-linker-related-action",
+		attr: {
+			type: "button",
+			"aria-label": `Exclude ${suggestion.targetTitle} from matching`,
+		},
+	});
+	setIcon(exclude.createSpan(), "ban");
+	exclude.createSpan({ text: "Exclude target" });
+	exclude.title = `Stop suggesting links to ${suggestion.targetTitle}`;
+	exclude.onclick = (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		void plugin.excludeTargetFromMatching(suggestion.targetPath, suggestion.targetTitle);
+	};
 
 	const apply = () => {
 		void plugin.applySidebarSuggestion(suggestion);

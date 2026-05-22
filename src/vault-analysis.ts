@@ -47,6 +47,23 @@ export async function analyzeEntireVault(
 		sourcesByPath[entry.record.path] = entry.source;
 	}
 
+	const analysisResult: VaultAnalysisResult = {
+		results: [],
+		totalSuggestions: 0,
+		filesWithSuggestions: 0,
+		graphMetrics: emptyMetrics(records.length),
+		sourcesByPath,
+		graphPreview: { nodes: [], edgesBefore: [], edgesAfter: [] },
+	};
+	recomputeVaultAnalysis(analysisResult, records);
+	await emitProgress(onProgress, {
+		stage: "reading",
+		current: records.length,
+		total: records.length,
+		message: `Loaded current graph for ${records.length} note${records.length === 1 ? "" : "s"}.`,
+		preview: cloneVaultAnalysisForPreview(analysisResult),
+	});
+
 	await emitProgress(onProgress, {
 		stage: "analyzing",
 		current: 0,
@@ -54,28 +71,31 @@ export async function analyzeEntireVault(
 		message: `Analyzing ${sources.length} note${sources.length === 1 ? "" : "s"}...`,
 	});
 	let analyzedCount = 0;
-	const analyzed = await mapWithConcurrency(sources, 8, async ({ record, source }) =>
+	let lastPreviewAt = 0;
+	await mapWithConcurrency(sources, 8, async ({ record, source }) =>
 		await analyzeNoteContent(record, source, index, settings, semanticIndex),
-		async () => {
+		async (analysis) => {
 			analyzedCount += 1;
+			if (analysis.suggestions.length > 0) {
+				analysisResult.results.push(analysis);
+			}
+			const shouldEmitPreview = analyzedCount === sources.length
+				|| analyzedCount <= 3
+				|| analyzedCount % 4 === 0
+				|| Date.now() - lastPreviewAt > 250;
+			if (shouldEmitPreview) {
+				recomputeVaultAnalysis(analysisResult, records);
+				lastPreviewAt = Date.now();
+			}
 			await emitProgress(onProgress, {
 				stage: "analyzing",
 				current: analyzedCount,
 				total: sources.length,
 				message: `Analyzed ${analyzedCount}/${sources.length} note${sources.length === 1 ? "" : "s"}.`,
+				preview: shouldEmitPreview ? cloneVaultAnalysisForPreview(analysisResult) : undefined,
 			});
 		},
 	);
-	const results = analyzed.filter((analysis) => analysis.suggestions.length > 0);
-
-	const analysisResult: VaultAnalysisResult = {
-		results,
-		totalSuggestions: 0,
-		filesWithSuggestions: 0,
-		graphMetrics: emptyMetrics(records.length),
-		sourcesByPath,
-		graphPreview: { nodes: [], edgesBefore: [], edgesAfter: [] },
-	};
 
 	recomputeVaultAnalysis(analysisResult, records);
 	await emitProgress(onProgress, {
@@ -83,6 +103,7 @@ export async function analyzeEntireVault(
 		current: records.length,
 		total: records.length,
 		message: `Prepared ${analysisResult.totalSuggestions} accepted suggestion${analysisResult.totalSuggestions === 1 ? "" : "s"} across the vault.`,
+		preview: cloneVaultAnalysisForPreview(analysisResult),
 	});
 	return analysisResult;
 }
@@ -242,5 +263,20 @@ function emptyMetrics(noteCount: number): VaultGraphMetrics {
 		existingLinkCount: 0,
 		projectedLinkCount: 0,
 		projectedAddedLinks: 0,
+	};
+}
+
+function cloneVaultAnalysisForPreview(analysis: VaultAnalysisResult): VaultAnalysisResult {
+	return {
+		results: analysis.results,
+		totalSuggestions: analysis.totalSuggestions,
+		filesWithSuggestions: analysis.filesWithSuggestions,
+		graphMetrics: { ...analysis.graphMetrics },
+		sourcesByPath: analysis.sourcesByPath,
+		graphPreview: {
+			nodes: analysis.graphPreview.nodes.map((node) => ({ ...node })),
+			edgesBefore: analysis.graphPreview.edgesBefore.map((edge) => ({ ...edge })),
+			edgesAfter: analysis.graphPreview.edgesAfter.map((edge) => ({ ...edge })),
+		},
 	};
 }

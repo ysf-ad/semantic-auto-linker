@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: SemanticAutoLinkerSettings = {
 	maxLinksPerNote: 12,
 	excludedFolders: [],
 	excludedFiles: [],
+	excludedTargetFiles: [],
 	enableAliasMatching: true,
 	skipHeadings: true,
 	seeAlsoHeading: "See also",
@@ -107,6 +108,18 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.excludedFiles = splitMultilineSetting(value);
 						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Excluded match targets")
+			.setDesc("File paths that stay in the vault but are never suggested as link targets. You can also add these from review rows.")
+			.addTextArea((text) =>
+				text
+					.setPlaceholder("Files.md")
+					.setValue(formatMultilineSetting(this.plugin.settings.excludedTargetFiles ?? []))
+					.onChange(async (value) => {
+						await this.plugin.updateExcludedTargetFiles(splitMultilineSetting(value));
 					}),
 			);
 

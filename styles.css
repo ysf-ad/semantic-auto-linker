@@ -170,9 +170,68 @@
 	flex-wrap: wrap;
 }
 
+.semantic-auto-linker-target-summary {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary));
+}
+
+.semantic-auto-linker-target-summary-label {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.semantic-auto-linker-target-summary-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.semantic-auto-linker-target-summary-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 100%;
+	min-height: 30px;
+	padding: 4px 8px;
+	color: var(--text-muted);
+}
+
+.semantic-auto-linker-target-summary-button:hover,
+.semantic-auto-linker-target-summary-button:focus-visible {
+	color: var(--text-error);
+}
+
+.semantic-auto-linker-target-summary-button svg {
+	width: 14px;
+	height: 14px;
+	flex: 0 0 auto;
+}
+
+.semantic-auto-linker-target-summary-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.semantic-auto-linker-target-summary-count {
+	min-width: 20px;
+	padding: 1px 6px;
+	border-radius: 999px;
+	font-size: 11px;
+	line-height: 1.4;
+	background: var(--background-modifier-border);
+	color: var(--text-muted);
+}
+
 .semantic-auto-linker-row {
 	display: grid;
-	grid-template-columns: auto 1fr;
+	grid-template-columns: auto minmax(0, 1fr) auto;
 	gap: 10px;
 	padding: 10px 12px;
 	border: 1px solid var(--background-modifier-border);
@@ -207,6 +266,34 @@
 	cursor: pointer;
 	color: var(--text-muted);
 	font-size: 0.85em;
+}
+
+.semantic-auto-linker-row-actions {
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-end;
+}
+
+.semantic-auto-linker-row-action-button,
+.semantic-auto-linker-related-action {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+	color: var(--text-muted);
+}
+
+.semantic-auto-linker-row-action-button svg,
+.semantic-auto-linker-related-action svg {
+	width: 14px;
+	height: 14px;
+}
+
+.semantic-auto-linker-row-action-button:hover,
+.semantic-auto-linker-row-action-button:focus-visible,
+.semantic-auto-linker-related-action:hover,
+.semantic-auto-linker-related-action:focus-visible {
+	color: var(--text-error);
 }
 
 .semantic-auto-linker-group {
@@ -730,6 +817,17 @@
 	opacity: 0.92;
 }
 
+.semantic-auto-linker-related-actions {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.semantic-auto-linker-related-action {
+	font-size: 12px;
+	padding: 4px 8px;
+	min-height: 28px;
+}
+
 .semantic-auto-linker-preview-row {
 	display: flex;
 	align-items: center;
@@ -836,7 +934,8 @@
 }
 
 .semantic-auto-linker-force-host {
-	height: min(42vh, 430px);
+	flex: 1 1 auto;
+	min-height: 420px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 12px;
 	overflow: hidden;
@@ -852,10 +951,10 @@
 	padding: 12px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 12px;
-	align-self: start;
+	align-self: stretch;
 	min-height: 0;
 	max-height: 100%;
-	overflow-y: auto;
+	overflow-y: hidden;
 	overflow-x: hidden;
 }
 
@@ -1200,6 +1299,17 @@
 	.semantic-auto-linker-status-grid,
 	.semantic-auto-linker-preview-grid {
 		grid-template-columns: 1fr;
+	}
+}
+
+@media (max-width: 700px) {
+	.semantic-auto-linker-row {
+		grid-template-columns: auto minmax(0, 1fr);
+	}
+
+	.semantic-auto-linker-row-actions {
+		grid-column: 2;
+		justify-content: flex-start;
 	}
 }
 
