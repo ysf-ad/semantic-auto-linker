@@ -13,10 +13,11 @@ export const DEFAULT_SETTINGS: SemanticAutoLinkerSettings = {
 	skipHeadings: true,
 	seeAlsoHeading: "See also",
 	seeAlsoCount: 5,
-	semanticMode: false,
-	semanticProviderId: "ollama",
+	semanticMode: true,
+	semanticProviderId: "transformers",
 	semanticTopK: 8,
 	semanticSummaryLength: 280,
+	semanticTransformersModel: "Xenova/all-MiniLM-L6-v2",
 	semanticOllamaBaseUrl: "http://127.0.0.1:11434",
 	semanticOllamaModel: "embeddinggemma",
 	semanticProjectionMetric: "cosine",
@@ -149,7 +150,7 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Semantic mode")
-			.setDesc("Enable semantic infrastructure and semantic index rebuild commands.")
+			.setDesc("Enable semantic matching. The default local model downloads automatically and runs on this device.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.semanticMode).onChange(async (value) => {
 					this.plugin.settings.semanticMode = value;
@@ -159,7 +160,7 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Semantic provider")
-			.setDesc("Embedding backend used for the semantic note index.")
+			.setDesc("Embedding backend used for the semantic note index. Local model is the zero-setup default; external local servers are optional.")
 			.addDropdown((dropdown) => {
 				for (const provider of this.plugin.getSemanticProviders()) {
 					dropdown.addOption(provider.id, provider.label);
@@ -168,8 +169,22 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 					this.plugin.settings.semanticProviderId = value;
 					await this.plugin.saveSettings();
 					await this.displayLiveSemanticModels(liveModelDropdown, liveModelStatusEl);
+					configuredModelText?.setValue(this.getConfiguredProviderModel());
 				});
 			});
+
+		new Setting(containerEl)
+			.setName("Local embedding model")
+			.setDesc("Transformers.js model downloaded automatically on first build and cached locally by Obsidian/Electron.")
+			.addText((text) =>
+				text
+					.setPlaceholder(DEFAULT_SETTINGS.semanticTransformersModel)
+					.setValue(this.plugin.settings.semanticTransformersModel)
+					.onChange(async (value) => {
+						this.plugin.settings.semanticTransformersModel = value.trim() || DEFAULT_SETTINGS.semanticTransformersModel;
+						await this.plugin.saveSettings();
+					}),
+			);
 
 		new Setting(containerEl)
 				.setName("Semantic top k")
@@ -201,7 +216,7 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 					if (!value) {
 						return;
 					}
-					this.plugin.settings.semanticOllamaModel = value;
+					this.setConfiguredProviderModel(value);
 					configuredModelText?.setValue(value);
 					await this.plugin.saveSettings();
 				});
@@ -232,12 +247,12 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 			.addText((text) => {
 				configuredModelText = text;
 				return text
-					.setPlaceholder(DEFAULT_SETTINGS.semanticOllamaModel)
-					.setValue(this.plugin.settings.semanticOllamaModel)
+					.setPlaceholder(this.getDefaultProviderModel())
+					.setValue(this.getConfiguredProviderModel())
 					.onChange(async (value) => {
-						this.plugin.settings.semanticOllamaModel = value.trim() || DEFAULT_SETTINGS.semanticOllamaModel;
+						this.setConfiguredProviderModel(value.trim() || this.getDefaultProviderModel());
 						await this.plugin.saveSettings();
-						populateLiveModelDropdown(liveModelDropdown, [], this.plugin.settings.semanticOllamaModel);
+						populateLiveModelDropdown(liveModelDropdown, [], this.getConfiguredProviderModel());
 					});
 			});
 
@@ -346,7 +361,7 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 			return;
 		}
 		const providerId = this.plugin.settings.semanticProviderId;
-		const configuredModel = this.plugin.settings.semanticOllamaModel.trim();
+		const configuredModel = this.getConfiguredProviderModel();
 		dropdown.selectEl.empty();
 		dropdown.addOption("", "Loading models...");
 		dropdown.setValue("");
@@ -366,6 +381,26 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 			const message = error instanceof Error ? error.message : "Unknown model discovery error";
 			statusEl.setText(`Could not load provider models: ${message}`);
 		}
+	}
+
+	private getConfiguredProviderModel(): string {
+		return this.plugin.settings.semanticProviderId === "transformers"
+			? this.plugin.settings.semanticTransformersModel
+			: this.plugin.settings.semanticOllamaModel;
+	}
+
+	private getDefaultProviderModel(): string {
+		return this.plugin.settings.semanticProviderId === "transformers"
+			? DEFAULT_SETTINGS.semanticTransformersModel
+			: DEFAULT_SETTINGS.semanticOllamaModel;
+	}
+
+	private setConfiguredProviderModel(value: string): void {
+		if (this.plugin.settings.semanticProviderId === "transformers") {
+			this.plugin.settings.semanticTransformersModel = value.trim() || DEFAULT_SETTINGS.semanticTransformersModel;
+			return;
+		}
+		this.plugin.settings.semanticOllamaModel = value.trim() || DEFAULT_SETTINGS.semanticOllamaModel;
 	}
 }
 

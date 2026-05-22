@@ -141,12 +141,70 @@ class OllamaSemanticProvider implements SemanticProvider {
 	}
 }
 
+class TransformersSemanticProvider implements SemanticProvider {
+	readonly id = "transformers";
+	readonly label = "Local model (built-in)";
+	private extractorByModel = new Map<string, Promise<TransformersExtractor>>();
+
+	getModelId(settings: SemanticAutoLinkerSettings): string {
+		return `transformers:${getTransformersModel(settings)}`;
+	}
+
+	checkAvailability(settings: SemanticAutoLinkerSettings): Promise<SemanticProviderAvailability> {
+		const model = getTransformersModel(settings);
+		return Promise.resolve({
+			available: Boolean(model),
+			reason: model ? null : "No local embedding model configured.",
+		});
+	}
+
+	listModels(_settings: SemanticAutoLinkerSettings): Promise<SemanticProviderModel[]> {
+		return Promise.resolve([
+			{ id: "Xenova/all-MiniLM-L6-v2", label: "Xenova/all-MiniLM-L6-v2 (fast default)" },
+			{ id: "Xenova/bge-small-en-v1.5", label: "Xenova/bge-small-en-v1.5 (higher quality)" },
+			{ id: "onnx-community/embeddinggemma-300m-ONNX", label: "EmbeddingGemma 300M (larger)" },
+		]);
+	}
+
+	async embed(text: string, settings: SemanticAutoLinkerSettings): Promise<number[]> {
+		const [vector] = await this.embedBatch([text], settings);
+		if (!vector) {
+			throw new Error("Local embedding model returned no vector.");
+		}
+		return vector;
+	}
+
+	async embedBatch(texts: string[], settings: SemanticAutoLinkerSettings): Promise<number[][]> {
+		if (texts.length === 0) {
+			return [];
+		}
+		const model = getTransformersModel(settings);
+		const extractor = await this.getExtractor(model);
+		const output = await extractor(texts.length === 1 ? texts[0] ?? "" : texts, {
+			pooling: "mean",
+			normalize: true,
+		});
+		return tensorOutputToVectors(output, texts.length);
+	}
+
+	private getExtractor(model: string): Promise<TransformersExtractor> {
+		const existing = this.extractorByModel.get(model);
+		if (existing) {
+			return existing;
+		}
+		const next = loadTransformersExtractor(model);
+		this.extractorByModel.set(model, next);
+		return next;
+	}
+}
+
 export class SemanticProviderRegistry {
 	private providers: SemanticProvider[];
 
 	constructor() {
 		this.providers = [
 			new DisabledSemanticProvider(),
+			new TransformersSemanticProvider(),
 			new OllamaSemanticProvider(),
 		];
 	}
@@ -163,6 +221,45 @@ export class SemanticProviderRegistry {
 
 interface OllamaEmbedResponse {
 	embeddings?: unknown[];
+}
+
+type TransformersExtractor = (input: string | string[], options: { pooling: string; normalize: boolean }) => Promise<unknown>;
+
+async function loadTransformersExtractor(model: string): Promise<TransformersExtractor> {
+	const transformers = await import("@huggingface/transformers");
+	const extractor = await transformers.pipeline("feature-extraction", model, {
+		quantized: true,
+	} as object);
+	return extractor as TransformersExtractor;
+}
+
+function getTransformersModel(settings: SemanticAutoLinkerSettings): string {
+	return (settings.semanticTransformersModel ?? "Xenova/all-MiniLM-L6-v2").trim() || "Xenova/all-MiniLM-L6-v2";
+}
+
+function tensorOutputToVectors(output: unknown, expectedCount: number): number[][] {
+	const values = tensorToList(output);
+	if (expectedCount === 1 && isNumberArray(values)) {
+		return [normalizeVector(values)];
+	}
+	if (Array.isArray(values) && values.every(isNumberArray)) {
+		return values.map((vector) => normalizeVector(vector));
+	}
+	if (Array.isArray(values) && values.length === 1 && Array.isArray(values[0]) && values[0].every(isNumberArray)) {
+		return (values[0] as unknown[]).map((vector) => normalizeVector(vector));
+	}
+	throw new Error("Local embedding model returned an unexpected vector shape.");
+}
+
+function tensorToList(output: unknown): unknown {
+	if (output && typeof output === "object" && "tolist" in output && typeof output.tolist === "function") {
+		return (output as { tolist: () => unknown }).tolist();
+	}
+	return output;
+}
+
+function isNumberArray(value: unknown): value is number[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
 function normalizeBaseUrl(baseUrl: string): string {

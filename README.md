@@ -27,24 +27,28 @@ It focuses on two things:
 
 ## Semantic mode
 
-Semantic mode is optional and local-first.
+Semantic mode is enabled by default and local-first.
 
 Current provider support:
+- Built-in local model through Transformers.js
 - Ollama
 
 Typical setup:
+1. In Obsidian, open **Settings → Community plugins → Semantic Auto-Linker**.
+2. Keep **Semantic provider** set to **Local model (built-in)**.
+3. Run **Build semantic embeddings**. The default local model downloads automatically on first use and is cached locally.
+
+Optional Ollama setup:
 1. Install and run [Ollama](https://ollama.com/).
 2. Pull an embedding model, for example:
    - `ollama pull embeddinggemma`
-3. In Obsidian, open **Settings → Community plugins → Semantic Auto-Linker**.
-4. Enable **Semantic mode**.
-5. Select the Ollama provider and model.
-6. Run **Build semantic embeddings**.
+3. Select the Ollama provider and model.
+4. Run **Build semantic embeddings**.
 
 ## Privacy and network behavior
 
 - The plugin is local/offline by default for deterministic linking.
-- Semantic mode is opt-in.
+- The default built-in local model downloads model files from Hugging Face on first use, then runs on-device.
 - When semantic mode uses Ollama, the plugin sends note-derived text to the configured Ollama endpoint, which is typically `http://127.0.0.1:11434`.
 - Auto-maintenance can rebuild the note index and semantic cache after vault changes if you enable it in settings.
 - No telemetry or analytics are included.

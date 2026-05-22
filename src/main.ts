@@ -493,13 +493,16 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	}
 
 	private async activateView(): Promise<void> {
-		const existingLeaf = this.app.workspace.getLeavesOfType(SEMANTIC_AUTO_LINKER_VIEW_TYPE)[0];
-		const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(true);
+		for (const existingLeaf of this.app.workspace.getLeavesOfType(SEMANTIC_AUTO_LINKER_VIEW_TYPE)) {
+			existingLeaf.detach();
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) {
 			return;
 		}
 		await leaf.setViewState({ type: SEMANTIC_AUTO_LINKER_VIEW_TYPE, active: true });
 		this.app.workspace.rightSplit.expand();
+		await this.app.workspace.revealLeaf(leaf);
 		this.app.workspace.setActiveLeaf(leaf, { focus: true });
 	}
 

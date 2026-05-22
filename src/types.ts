@@ -14,6 +14,7 @@ export interface SemanticAutoLinkerSettings {
 	semanticProviderId: string;
 	semanticTopK: number;
 	semanticSummaryLength: number;
+	semanticTransformersModel: string;
 	semanticOllamaBaseUrl: string;
 	semanticOllamaModel: string;
 	semanticProjectionMetric: "cosine" | "euclidean";
