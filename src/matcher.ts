@@ -506,8 +506,8 @@ function extractExistingTargets(source: string): string[] {
 }
 
 function buildReplacement(targetLink: string, targetTitle: string, matchedText: string): string {
-	if (matchedText === targetTitle) {
-		return `[[${targetLink}]]`;
+	if (normalizeText(matchedText) === normalizeText(targetTitle)) {
+		return `[[${targetTitle}]]`;
 	}
 	return `[[${targetLink}|${matchedText}]]`;
 }
