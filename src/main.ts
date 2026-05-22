@@ -98,12 +98,16 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		const semanticCache = raw && "semanticCache" in raw ? raw.semanticCache ?? {} : {};
 		const vaultAnalysisSnapshot = raw && "vaultAnalysisSnapshot" in raw ? raw.vaultAnalysisSnapshot ?? null : null;
 		const vaultAnalysisJobState = raw && "vaultAnalysisJobState" in raw ? raw.vaultAnalysisJobState ?? null : null;
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, settingsSource);
+		const { settings, migrated } = migrateLoadedSettings(settingsSource);
+		this.settings = settings;
 		this.semanticCache = semanticCache;
 		this.persistedVaultAnalysisSnapshot = vaultAnalysisSnapshot;
 		this.vaultAnalysisJobState = vaultAnalysisJobState
 			? { ...createInitialVaultAnalysisJobState(), ...vaultAnalysisJobState }
 			: createInitialVaultAnalysisJobState();
+		if (migrated) {
+			await this.savePluginData();
+		}
 	}
 
 	async saveSettings(): Promise<void> {
@@ -1312,6 +1316,41 @@ function removeSuggestionsForTargets(analysis: VaultAnalysisResult, excludedTarg
 
 function isPluginStorageDataShape(value: unknown): value is Partial<PluginStorageData & SemanticAutoLinkerSettings> {
 	return value === null || typeof value === "object";
+}
+
+function migrateLoadedSettings(settingsSource: Partial<SemanticAutoLinkerSettings>): { settings: SemanticAutoLinkerSettings; migrated: boolean } {
+	const settings = Object.assign({}, DEFAULT_SETTINGS, settingsSource);
+	let migrated = false;
+
+	if (!isKnownSemanticProvider(settings.semanticProviderId)) {
+		settings.semanticProviderId = DEFAULT_SETTINGS.semanticProviderId;
+		migrated = true;
+	}
+
+	const hadTransformersModel = hasOwnSetting(settingsSource, "semanticTransformersModel");
+	const hadOldDefaultOllamaProvider = settings.semanticProviderId === "ollama"
+		&& !hadTransformersModel
+		&& settings.semanticOllamaBaseUrl === DEFAULT_SETTINGS.semanticOllamaBaseUrl
+		&& settings.semanticOllamaModel === DEFAULT_SETTINGS.semanticOllamaModel;
+	if (hadOldDefaultOllamaProvider) {
+		settings.semanticProviderId = DEFAULT_SETTINGS.semanticProviderId;
+		migrated = true;
+	}
+
+	if (settings.semanticMode !== DEFAULT_SETTINGS.semanticMode && !hasOwnSetting(settingsSource, "semanticProviderId")) {
+		settings.semanticMode = DEFAULT_SETTINGS.semanticMode;
+		migrated = true;
+	}
+
+	return { settings, migrated };
+}
+
+function isKnownSemanticProvider(providerId: string): boolean {
+	return providerId === "none" || providerId === "transformers" || providerId === "ollama";
+}
+
+function hasOwnSetting(settingsSource: Partial<SemanticAutoLinkerSettings>, key: keyof SemanticAutoLinkerSettings): boolean {
+	return Object.prototype.hasOwnProperty.call(settingsSource, key);
 }
 
 function buildFooterSuggestionsFromAccepted(suggestions: LinkSuggestion[]): RelatedNoteSuggestion[] {
