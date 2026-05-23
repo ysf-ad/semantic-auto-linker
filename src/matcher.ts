@@ -105,121 +105,125 @@ export async function analyzeNoteContent(
 	}
 
 	if (semanticIndex && settings.semanticMode && suggestions.length < displaySuggestionLimit) {
-		const semanticSpans = buildSemanticSpanCandidates(tokens, source, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints);
-		if (semanticSpans.length > 0) {
-			const documentQuery = buildDocumentSemanticQuery(semanticSpans, source, settings);
-			const documentMatches = documentQuery
-				? await semanticIndex.findHybridSimilarNotes(documentQuery, file.path, Math.max(settings.semanticTopK, 6))
-				: [];
-			const candidateTargetPaths = new Set(
-				documentMatches
-					.filter((match) => !excludedTargetPaths.has(match.targetPath))
-					.filter((match) => match.score >= Math.max(settings.semanticDisplayThreshold, 0.42))
-					.slice(0, Math.max(settings.semanticTopK, 6))
-					.map((match) => match.targetPath),
-			);
-			const spanBudget = candidateTargetPaths.size > 0 ? 4 : 6;
-			const spanQueries = semanticSpans
-				.slice(0, spanBudget)
-				.map((span) => span.normalized);
-			const matchesByQuery = new Map<string, SemanticQueryMatch[]>();
-			await Promise.all(
-				spanQueries.map(async (query) => {
-					const mergedMatches = await semanticIndex.findHybridSimilarNotes(query, file.path, settings.semanticTopK);
-					const shortlistedMatches = candidateTargetPaths.size > 0
-						? mergedMatches.filter((match) => candidateTargetPaths.has(match.targetPath))
-						: mergedMatches;
-					matchesByQuery.set(query, shortlistedMatches.length > 0 ? shortlistedMatches : mergedMatches);
-				}),
-			);
-			const semanticCandidates: LinkSuggestion[] = [];
-			for (const span of semanticSpans.slice(0, spanBudget)) {
-			const matches = matchesByQuery.get(span.normalized) ?? [];
-			const rankedMatches = matches
-				.map((match) => ({
-					...match,
-					score: match.score + (candidateTargetPaths.has(match.targetPath) ? 0.08 : 0),
-				}))
-				.filter((match) =>
-					!excludedTargetPaths.has(match.targetPath)
-					&& match.score >= settings.semanticDisplayThreshold
-					&& normalizeText(span.text) !== normalizeText(match.targetTitle),
+		try {
+			const semanticSpans = buildSemanticSpanCandidates(tokens, source, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints);
+			if (semanticSpans.length > 0) {
+				const documentQuery = buildDocumentSemanticQuery(semanticSpans, source, settings);
+				const documentMatches = documentQuery
+					? await semanticIndex.findHybridSimilarNotes(documentQuery, file.path, Math.max(settings.semanticTopK, 6))
+					: [];
+				const candidateTargetPaths = new Set(
+					documentMatches
+						.filter((match) => !excludedTargetPaths.has(match.targetPath))
+						.filter((match) => match.score >= Math.max(settings.semanticDisplayThreshold, 0.42))
+						.slice(0, Math.max(settings.semanticTopK, 6))
+						.map((match) => match.targetPath),
 				);
-			const best = rankedMatches[0];
-			if (!best) {
-				continue;
-			}
-			const chosen = rankedMatches.find((match, index) => {
-				if (!match) {
-					return false;
-				}
-				if (!usedTargets.has(match.targetPath) && !usedTargets.has(match.targetLink)) {
-					if (index === 0) {
-						return true;
+				const spanBudget = candidateTargetPaths.size > 0 ? 4 : 6;
+				const spanQueries = semanticSpans
+					.slice(0, spanBudget)
+					.map((span) => span.normalized);
+				const matchesByQuery = new Map<string, SemanticQueryMatch[]>();
+				await Promise.all(
+					spanQueries.map(async (query) => {
+						const mergedMatches = await semanticIndex.findHybridSimilarNotes(query, file.path, settings.semanticTopK);
+						const shortlistedMatches = candidateTargetPaths.size > 0
+							? mergedMatches.filter((match) => candidateTargetPaths.has(match.targetPath))
+							: mergedMatches;
+						matchesByQuery.set(query, shortlistedMatches.length > 0 ? shortlistedMatches : mergedMatches);
+					}),
+				);
+				const semanticCandidates: LinkSuggestion[] = [];
+				for (const span of semanticSpans.slice(0, spanBudget)) {
+					const matches = matchesByQuery.get(span.normalized) ?? [];
+					const rankedMatches = matches
+						.map((match) => ({
+							...match,
+							score: match.score + (candidateTargetPaths.has(match.targetPath) ? 0.08 : 0),
+						}))
+						.filter((match) =>
+							!excludedTargetPaths.has(match.targetPath)
+							&& match.score >= settings.semanticDisplayThreshold
+							&& normalizeText(span.text) !== normalizeText(match.targetTitle),
+						);
+					const best = rankedMatches[0];
+					if (!best) {
+						continue;
 					}
-					return match.score >= 0.5 && best.score - match.score <= 0.03;
-				}
-				return false;
-			});
-			if (!chosen) {
-				continue;
-			}
-			const secondBest = rankedMatches.find((match) =>
-				match.targetPath !== chosen.targetPath
-				&& match.targetLink !== chosen.targetLink,
-			);
-			const isStrongSingleWordSpan = span.normalized.split(" ").length === 1 && isStrongSingleWordSemanticSpan(span.normalized, semanticSingleWordHints);
-			const isAmbiguous = Boolean(
-				secondBest
-				&& chosen.score < 0.62
-				&& chosen.score - secondBest.score < 0.035,
-			);
-			if (isAmbiguous && chosen.score < Math.max(settings.semanticDisplayThreshold, isStrongSingleWordSpan ? 0.48 : 0.56)) {
-				continue;
-			}
+					const chosen = rankedMatches.find((match, index) => {
+						if (!match) {
+							return false;
+						}
+						if (!usedTargets.has(match.targetPath) && !usedTargets.has(match.targetLink)) {
+							if (index === 0) {
+								return true;
+							}
+							return match.score >= 0.5 && best.score - match.score <= 0.03;
+						}
+						return false;
+					});
+					if (!chosen) {
+						continue;
+					}
+					const secondBest = rankedMatches.find((match) =>
+						match.targetPath !== chosen.targetPath
+						&& match.targetLink !== chosen.targetLink,
+					);
+					const isStrongSingleWordSpan = span.normalized.split(" ").length === 1 && isStrongSingleWordSemanticSpan(span.normalized, semanticSingleWordHints);
+					const isAmbiguous = Boolean(
+						secondBest
+						&& chosen.score < 0.62
+						&& chosen.score - secondBest.score < 0.035,
+					);
+					if (isAmbiguous && chosen.score < Math.max(settings.semanticDisplayThreshold, isStrongSingleWordSpan ? 0.48 : 0.56)) {
+						continue;
+					}
 
-			const replacement = buildReplacement(chosen.targetLink, chosen.targetTitle, span.text);
-			semanticCandidates.push({
-					id: `${chosen.targetPath}:${span.start}:${span.end}:semantic`,
-					sourcePath: file.path,
-					targetPath: chosen.targetPath,
-					targetTitle: chosen.targetTitle,
-					targetLink: chosen.targetLink,
-					matchedText: span.text,
-					replacement,
-					start: span.start,
-					end: span.end,
-					reason: "semantic",
-					confidence: Math.max(0, Math.min(0.96, chosen.score)),
-					context: buildContextSnippet(source, span.start, span.end),
-					accepted: chosen.score >= settings.semanticAcceptanceThreshold,
-					matchType: "semantic",
-				});
-			}
+					const replacement = buildReplacement(chosen.targetLink, chosen.targetTitle, span.text);
+					semanticCandidates.push({
+						id: `${chosen.targetPath}:${span.start}:${span.end}:semantic`,
+						sourcePath: file.path,
+						targetPath: chosen.targetPath,
+						targetTitle: chosen.targetTitle,
+						targetLink: chosen.targetLink,
+						matchedText: span.text,
+						replacement,
+						start: span.start,
+						end: span.end,
+						reason: "semantic",
+						confidence: Math.max(0, Math.min(0.96, chosen.score)),
+						context: buildContextSnippet(source, span.start, span.end),
+						accepted: chosen.score >= settings.semanticAcceptanceThreshold,
+						matchType: "semantic",
+					});
+				}
 
-			const consolidatedSemanticCandidates = collapseSemanticCandidatesByTarget(semanticCandidates);
-			consolidatedSemanticCandidates.sort((left, right) =>
-				right.confidence - left.confidence || (right.end - right.start) - (left.end - left.start) || left.start - right.start,
-			);
-			const semanticBudget = getSemanticSuggestionBudget(file.path, file.title);
+				const consolidatedSemanticCandidates = collapseSemanticCandidatesByTarget(semanticCandidates);
+				consolidatedSemanticCandidates.sort((left, right) =>
+					right.confidence - left.confidence || (right.end - right.start) - (left.end - left.start) || left.start - right.start,
+				);
+				const semanticBudget = getSemanticSuggestionBudget(file.path, file.title);
 
-			for (const candidate of consolidatedSemanticCandidates) {
-				if (suggestions.length >= displaySuggestionLimit) {
-					break;
+				for (const candidate of consolidatedSemanticCandidates) {
+					if (suggestions.length >= displaySuggestionLimit) {
+						break;
+					}
+					if (semanticBudget > 0 && suggestions.filter((suggestion) => suggestion.matchType === "semantic").length >= semanticBudget) {
+						break;
+					}
+					if (usedTargets.has(candidate.targetPath) || usedTargets.has(candidate.targetLink)) {
+						continue;
+					}
+					if (suggestions.some((suggestion) => rangesOverlap(suggestion.start, suggestion.end, candidate.start, candidate.end))) {
+						continue;
+					}
+					suggestions.push(candidate);
+					usedTargets.add(candidate.targetPath);
+					usedTargets.add(candidate.targetLink);
 				}
-				if (semanticBudget > 0 && suggestions.filter((suggestion) => suggestion.matchType === "semantic").length >= semanticBudget) {
-					break;
-				}
-				if (usedTargets.has(candidate.targetPath) || usedTargets.has(candidate.targetLink)) {
-					continue;
-				}
-				if (suggestions.some((suggestion) => rangesOverlap(suggestion.start, suggestion.end, candidate.start, candidate.end))) {
-					continue;
-				}
-				suggestions.push(candidate);
-				usedTargets.add(candidate.targetPath);
-				usedTargets.add(candidate.targetLink);
 			}
+		} catch {
+			// Semantic matching is opportunistic; deterministic suggestions should still be reviewable.
 		}
 	}
 

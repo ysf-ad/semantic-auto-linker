@@ -145,6 +145,7 @@ class TransformersSemanticProvider implements SemanticProvider {
 	readonly id = "transformers";
 	readonly label = "Local model (built-in)";
 	private extractorByModel = new Map<string, Promise<TransformersExtractor>>();
+	private inferenceQueue: Promise<void> = Promise.resolve();
 
 	getModelId(settings: SemanticAutoLinkerSettings): string {
 		return `transformers:${getTransformersModel(settings)}`;
@@ -178,13 +179,15 @@ class TransformersSemanticProvider implements SemanticProvider {
 		if (texts.length === 0) {
 			return [];
 		}
-		const model = getTransformersModel(settings);
-		const extractor = await this.getExtractor(model);
-		const output = await extractor(texts.length === 1 ? texts[0] ?? "" : texts, {
-			pooling: "mean",
-			normalize: true,
+		return await this.runQueued(async () => {
+			const model = getTransformersModel(settings);
+			const extractor = await this.getExtractor(model);
+			const output = await extractor(texts.length === 1 ? texts[0] ?? "" : texts, {
+				pooling: "mean",
+				normalize: true,
+			});
+			return tensorOutputToVectors(output, texts.length);
 		});
-		return tensorOutputToVectors(output, texts.length);
 	}
 
 	private getExtractor(model: string): Promise<TransformersExtractor> {
@@ -195,6 +198,20 @@ class TransformersSemanticProvider implements SemanticProvider {
 		const next = loadTransformersExtractor(model);
 		this.extractorByModel.set(model, next);
 		return next;
+	}
+
+	private async runQueued<T>(task: () => Promise<T>): Promise<T> {
+		const previous = this.inferenceQueue;
+		let release: () => void = () => undefined;
+		this.inferenceQueue = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await previous;
+		try {
+			return await task();
+		} finally {
+			release();
+		}
 	}
 }
 

@@ -13,7 +13,7 @@ const { normalizePathToLink, normalizeText, tokenize, uniqueStrings } = await ji
 export async function createDevVaultHarness() {
 	const rootDir = path.resolve("dev-vault");
 	const pluginDataPath = path.join(rootDir, ".obsidian", "plugins", "semantic-auto-linker", "data.json");
-	const pluginData = JSON.parse(await fs.readFile(pluginDataPath, "utf8"));
+	const pluginData = await readPluginData(pluginDataPath);
 	const settings = {
 		...defaultSettings(),
 		...(pluginData.settings ?? {}),
@@ -74,6 +74,17 @@ export async function createDevVaultHarness() {
 			);
 		},
 	};
+}
+
+async function readPluginData(pluginDataPath) {
+	try {
+		return JSON.parse(await fs.readFile(pluginDataPath, "utf8"));
+	} catch (error) {
+		if (error?.code === "ENOENT") {
+			return {};
+		}
+		throw error;
+	}
 }
 
 async function collectMarkdownEntries(rootDir) {

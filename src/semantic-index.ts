@@ -80,7 +80,10 @@ export class SemanticIndex {
 		const summary = summarizeNote(source, this.settings.semanticSummaryLength);
 		const sourceText = buildSemanticSourceText(note, summary);
 		const modelId = provider.getModelId(this.settings);
-		const vector = await provider.embed(sourceText, this.settings);
+		const vector = await this.embedSingleSafely(provider, provider.id, modelId, sourceText);
+		if (!vector) {
+			return false;
+		}
 		const nextRecord: SemanticNoteRecord = {
 			path: note.path,
 			title: note.title,
@@ -132,8 +135,9 @@ export class SemanticIndex {
 			: {
 				available: false,
 				reason: "Semantic mode is disabled.",
-			};
+		};
 		const providerAvailable = availability.available;
+		let effectiveAvailability = availability;
 		const modelId = provider.getModelId(this.settings);
 		const notes = this.vaultIndex.getAll();
 		const nextRecords = new Map<string, SemanticNoteRecord>();
@@ -188,9 +192,14 @@ export class SemanticIndex {
 					message: `Generating embeddings (${embeddedCount}/${notesToEmbed.length})`,
 				});
 				const texts = batch.map((item) => item.record.sourceText);
-				const vectors = provider.embedBatch
-					? await provider.embedBatch(texts, this.settings)
-					: await Promise.all(texts.map((text) => provider.embed(text, this.settings)));
+				const vectors = await this.embedBatchSafely(provider, provider.id, modelId, texts);
+				if (!vectors) {
+					effectiveAvailability = this.lastProviderAvailability ?? {
+						available: false,
+						reason: `${provider.label} embedding failed.`,
+					};
+					break;
+				}
 
 				vectors.forEach((vector, index) => {
 					const target = batch[index];
@@ -229,17 +238,17 @@ export class SemanticIndex {
 
 		this.records = nextRecords;
 		this.lastBuiltAt = Date.now();
-		this.lastProviderAvailability = availability;
+		this.lastProviderAvailability = effectiveAvailability;
 		this.queryVectorCache.clear();
 		this.queryResultCache.clear();
 		await this.rebuildApproximateIndex(provider.id);
 		await notifyProgress(onProgress, {
 			stage: "complete",
-			current: providerAvailable ? notes.length : 0,
+			current: effectiveAvailability.available ? notes.length : 0,
 			total: notes.length,
-			message: providerAvailable
+			message: effectiveAvailability.available
 				? `Semantic index ready for ${notes.length} notes.`
-				: availability.reason ?? "Semantic index unavailable.",
+				: effectiveAvailability.reason ?? "Semantic index unavailable.",
 		});
 		return this.getStatus();
 	}
@@ -401,6 +410,9 @@ export class SemanticIndex {
 
 		const providerId = provider.id;
 		const modelId = provider.getModelId(this.settings);
+		if (this.searchableRecords.length === 0) {
+			return result;
+		}
 		await this.populateQueryVectors(provider, providerId, modelId, trimmedQueries);
 
 		for (const query of trimmedQueries) {
@@ -477,6 +489,9 @@ export class SemanticIndex {
 
 		const providerId = provider.id;
 		const modelId = provider.getModelId(this.settings);
+		if (this.searchableRecords.length === 0) {
+			return;
+		}
 		await this.populateQueryVectors(provider, providerId, modelId, trimmedQueries);
 
 		for (const query of trimmedQueries) {
@@ -558,9 +573,10 @@ export class SemanticIndex {
 			return;
 		}
 
-		const newVectors = provider.embedBatch
-			? await provider.embedBatch(queriesToEmbed, this.settings)
-			: await Promise.all(queriesToEmbed.map((query) => provider.embed(query, this.settings)));
+		const newVectors = await this.embedBatchSafely(provider, providerId, modelId, queriesToEmbed);
+		if (!newVectors) {
+			return;
+		}
 		newVectors.forEach((vector, index) => {
 			const query = queriesToEmbed[index];
 			if (!query) {
@@ -578,6 +594,40 @@ export class SemanticIndex {
 	): Promise<number[] | null> {
 		await this.populateQueryVectors(provider, providerId, modelId, [query]);
 		return this.queryVectorCache.get(buildQueryVectorCacheKey(providerId, modelId, query)) ?? null;
+	}
+
+	private async embedSingleSafely(
+		provider: ReturnType<SemanticProviderRegistry["getById"]>,
+		providerId: string,
+		modelId: string,
+		text: string,
+	): Promise<number[] | null> {
+		const [vector] = (await this.embedBatchSafely(provider, providerId, modelId, [text])) ?? [];
+		return vector ?? null;
+	}
+
+	private async embedBatchSafely(
+		provider: ReturnType<SemanticProviderRegistry["getById"]>,
+		providerId: string,
+		modelId: string,
+		texts: string[],
+	): Promise<number[][] | null> {
+		try {
+			return provider.embedBatch
+				? await provider.embedBatch(texts, this.settings)
+				: await Promise.all(texts.map((text) => provider.embed(text, this.settings)));
+		} catch (error) {
+			this.markProviderRuntimeFailure(providerId, modelId, error);
+			return null;
+		}
+	}
+
+	private markProviderRuntimeFailure(providerId: string, modelId: string, error: unknown): void {
+		const message = error instanceof Error ? error.message : String(error);
+		this.lastProviderAvailability = {
+			available: false,
+			reason: `${providerId} embedding failed for ${modelId}: ${message}`,
+		};
 	}
 
 	private async rebuildApproximateIndex(providerId: string): Promise<void> {
@@ -601,16 +651,22 @@ export class SemanticIndex {
 			return;
 		}
 
-		const index = new HNSW(16, 200, dimension, "cosine", 64);
-		this.annPathById = new Map<number, string>();
-		await index.buildIndex(records.map(({ record, embedding }, id) => {
-			this.annPathById.set(id, record.path);
-			return {
-				id,
-				vector: embedding,
-			};
-		}));
-		this.annIndex = index;
+		try {
+			const index = new HNSW(16, 200, dimension, "cosine", 64);
+			const annPathById = new Map<number, string>();
+			await index.buildIndex(records.map(({ record, embedding }, id) => {
+				annPathById.set(id, record.path);
+				return {
+					id,
+					vector: embedding,
+				};
+			}));
+			this.annPathById = annPathById;
+			this.annIndex = index;
+		} catch {
+			this.annIndex = null;
+			this.annPathById.clear();
+		}
 	}
 
 	private searchApproximate(
@@ -624,7 +680,14 @@ export class SemanticIndex {
 		}
 
 		const recordByPath = new Map(scoredRecords.map(({ record }) => [record.path, record]));
-		const approximate = this.annIndex.searchKNN(queryVector, Math.min(scoredRecords.length, Math.max(limit, 12)));
+		let approximate: Array<{ id: number }> = [];
+		try {
+			approximate = this.annIndex.searchKNN(queryVector, Math.min(scoredRecords.length, Math.max(limit, 12)));
+		} catch {
+			this.annIndex = null;
+			this.annPathById.clear();
+			return searchBruteForce(query, queryVector, scoredRecords, limit);
+		}
 		const matches = approximate
 			.map((item) => {
 				const path = this.annPathById.get(item.id);
