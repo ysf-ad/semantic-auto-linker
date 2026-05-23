@@ -1,6 +1,6 @@
 {
 	"name": "semantic-auto-linker",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"description": "Safe and reviewable auto-linking for Obsidian",
 	"main": "main.js",
 	"type": "module",
