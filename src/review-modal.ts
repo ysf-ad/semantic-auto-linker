@@ -167,6 +167,8 @@ export class VaultReviewModal extends Modal {
 	private filterMode: VaultFilterMode = "all";
 	private groupSortMode: VaultGroupSortMode = "name";
 	private suggestionSortMode: VaultSuggestionSortMode = "document";
+	private showExactMatches = true;
+	private showSemanticMatches = true;
 	private expandedGroups = new Set<string>();
 	private groupSortControlEl: HTMLElement | null = null;
 	private groupButtonsControlEl: HTMLElement | null = null;
@@ -226,7 +228,7 @@ export class VaultReviewModal extends Modal {
 			});
 			this.graphPlaceholderEl.createDiv({ cls: "semantic-auto-linker-loading-spinner" });
 			this.graphPlaceholderEl.createDiv({
-				text: "Building whole-vault review and graph preview...",
+				text: "Building whole-vault review and graph preview. You can close this modal; the scan will keep running in the background.",
 				cls: "semantic-auto-linker-empty-state",
 			});
 		}
@@ -333,6 +335,7 @@ export class VaultReviewModal extends Modal {
 	}
 
 	private renderControls(containerEl: HTMLElement): void {
+		this.renderSourceToggles(containerEl);
 		this.renderSelectControl(
 			containerEl,
 			"Filter",
@@ -384,7 +387,15 @@ export class VaultReviewModal extends Modal {
 		this.groupButtonsControlEl = expandControls;
 		expandControls.createEl("label", { text: "Groups" });
 		const buttons = expandControls.createDiv({ cls: "semantic-auto-linker-vault-inline-buttons" });
-		buttons.createEl("button", { text: "Expand all" }).onclick = () => {
+		const expandButton = buttons.createEl("button", {
+			cls: "semantic-auto-linker-icon-button",
+			attr: {
+				"aria-label": "Expand all groups",
+				title: "Expand all groups",
+			},
+		});
+		setIcon(expandButton, "chevrons-down");
+		expandButton.onclick = () => {
 			if (!this.analysis) {
 				return;
 			}
@@ -393,11 +404,33 @@ export class VaultReviewModal extends Modal {
 			}
 			this.renderResultList();
 		};
-		buttons.createEl("button", { text: "Collapse all" }).onclick = () => {
+		const collapseButton = buttons.createEl("button", {
+			cls: "semantic-auto-linker-icon-button",
+			attr: {
+				"aria-label": "Collapse all groups",
+				title: "Collapse all groups",
+			},
+		});
+		setIcon(collapseButton, "chevrons-up");
+		collapseButton.onclick = () => {
 			this.expandedGroups.clear();
 			this.renderResultList();
 		};
 		this.updateControlVisibility();
+	}
+
+	private renderSourceToggles(containerEl: HTMLElement): void {
+		const wrapper = containerEl.createDiv({ cls: "semantic-auto-linker-vault-control semantic-auto-linker-source-control" });
+		wrapper.createEl("label", { text: "Sources" });
+		const buttons = wrapper.createDiv({ cls: "semantic-auto-linker-source-toggles" });
+		createSourceToggle(buttons, "Exact", this.showExactMatches, "Show title, alias, and acronym matches", (value) => {
+			this.showExactMatches = value;
+			this.renderResultList();
+		});
+		createSourceToggle(buttons, "AI", this.showSemanticMatches, "Show semantic AI matches", (value) => {
+			this.showSemanticMatches = value;
+			this.renderResultList();
+		});
 	}
 
 	private renderSelectControl(
@@ -568,6 +601,12 @@ export class VaultReviewModal extends Modal {
 	}
 
 	private matchesFilter(suggestion: LinkSuggestion): boolean {
+		if (suggestion.matchType === "semantic" && !this.showSemanticMatches) {
+			return false;
+		}
+		if (suggestion.matchType !== "semantic" && !this.showExactMatches) {
+			return false;
+		}
 		switch (this.filterMode) {
 			case "semantic":
 				return suggestion.matchType === "semantic";
@@ -604,7 +643,7 @@ export class VaultReviewModal extends Modal {
 		}
 		if (!this.analysis || !metrics) {
 			this.summaryPrimaryEl.setText("Preparing whole-vault analysis...");
-			this.summarySecondaryEl.setText("The review modal opens immediately and fills in once note scanning completes.");
+			this.summarySecondaryEl.setText("You can close this modal while scanning continues in the background.");
 			return;
 		}
 		const normalizedEntries = entries as Array<{ result: AnalysisResult; suggestions?: LinkSuggestion[]; suggestion?: LinkSuggestion }>;
@@ -895,6 +934,34 @@ function createThresholdAcceptMenu(
 		const nextOpen = panel.style.display === "none";
 		panel.setCssProps({ display: nextOpen ? "flex" : "none" });
 		toggle.toggleClass("is-active", nextOpen);
+	};
+}
+
+function createSourceToggle(
+	containerEl: HTMLElement,
+	label: string,
+	initialValue: boolean,
+	tooltip: string,
+	onChange: (value: boolean) => void,
+): void {
+	const button = containerEl.createEl("button", {
+		text: label,
+		cls: "semantic-auto-linker-source-toggle",
+		attr: {
+			"aria-pressed": String(initialValue),
+			title: tooltip,
+		},
+	});
+	let value = initialValue;
+	const sync = () => {
+		button.toggleClass("is-active", value);
+		button.setAttribute("aria-pressed", String(value));
+	};
+	sync();
+	button.onclick = () => {
+		value = !value;
+		sync();
+		onChange(value);
 	};
 }
 

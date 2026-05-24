@@ -6,7 +6,9 @@ export interface SemanticAutoLinkerSettings {
 	excludedFolders: string[];
 	excludedFiles: string[];
 	excludedTargetFiles: string[];
+	enableExactMatching: boolean;
 	enableAliasMatching: boolean;
+	enableSemanticSuggestions: boolean;
 	skipHeadings: boolean;
 	seeAlsoHeading: string;
 	seeAlsoCount: number;

@@ -23,6 +23,7 @@ export async function analyzeEntireVault(
 	onProgress?: (progress: VaultAnalysisRunProgress) => void | Promise<void>,
 ): Promise<VaultAnalysisResult> {
 	const records = index.getAll();
+	const providerId = settings.semanticMode ? semanticIndex.getStatus().providerId : "none";
 	await emitProgress(onProgress, {
 		stage: "reading",
 		current: 0,
@@ -30,17 +31,21 @@ export async function analyzeEntireVault(
 		message: `Reading ${records.length} note${records.length === 1 ? "" : "s"}...`,
 	});
 	let readCount = 0;
-	const sources = await mapWithConcurrency(records, 8, async (record) => ({
+	let lastReadProgressAt = 0;
+	const sources = await mapWithConcurrency(records, getReadConcurrency(records.length), async (record) => ({
 		record,
 		source: await readFile(record),
 	}), async () => {
 		readCount += 1;
-		await emitProgress(onProgress, {
-			stage: "reading",
-			current: readCount,
-			total: records.length,
-			message: `Read ${readCount}/${records.length} note${records.length === 1 ? "" : "s"}.`,
-		});
+		if (shouldEmitProgress(readCount, records.length, lastReadProgressAt, 150)) {
+			lastReadProgressAt = Date.now();
+			await emitProgress(onProgress, {
+				stage: "reading",
+				current: readCount,
+				total: records.length,
+				message: `Read ${readCount}/${records.length} note${records.length === 1 ? "" : "s"}.`,
+			});
+		}
 	});
 	const sourcesByPath: Record<string, string> = {};
 	for (const entry of sources) {
@@ -72,7 +77,7 @@ export async function analyzeEntireVault(
 	});
 	let analyzedCount = 0;
 	let lastPreviewAt = 0;
-	const analysisConcurrency = settings.semanticMode ? 2 : 8;
+	const analysisConcurrency = getAnalysisConcurrency(settings, providerId, records.length);
 	await mapWithConcurrency(sources, analysisConcurrency, async ({ record, source }) =>
 		await analyzeNoteContent(record, source, index, settings, semanticIndex),
 		async (analysis) => {
@@ -80,10 +85,7 @@ export async function analyzeEntireVault(
 			if (analysis.suggestions.length > 0) {
 				analysisResult.results.push(analysis);
 			}
-			const shouldEmitPreview = analyzedCount === sources.length
-				|| analyzedCount <= 3
-				|| analyzedCount % 4 === 0
-				|| Date.now() - lastPreviewAt > 250;
+			const shouldEmitPreview = shouldEmitLivePreview(analyzedCount, sources.length, lastPreviewAt);
 			if (shouldEmitPreview) {
 				recomputeVaultAnalysis(analysisResult, records);
 				lastPreviewAt = Date.now();
@@ -114,6 +116,40 @@ function yieldToUi(): Promise<void> {
 	return new Promise((resolve) => {
 		setTimeout(resolve, 0);
 	});
+}
+
+function getReadConcurrency(noteCount: number): number {
+	if (noteCount >= 1000) {
+		return 16;
+	}
+	return 8;
+}
+
+function getAnalysisConcurrency(settings: SemanticAutoLinkerSettings, providerId: string, noteCount: number): number {
+	if (!settings.semanticMode) {
+		return noteCount >= 1000 ? 12 : 8;
+	}
+	if (providerId === "local-fallback") {
+		return 10;
+	}
+	if (providerId === "ollama") {
+		return 6;
+	}
+	return 3;
+}
+
+function shouldEmitProgress(current: number, total: number, lastEmittedAt: number, minIntervalMs: number): boolean {
+	return current === total
+		|| current <= 3
+		|| Date.now() - lastEmittedAt >= minIntervalMs;
+}
+
+function shouldEmitLivePreview(current: number, total: number, lastPreviewAt: number): boolean {
+	const interval = total >= 2000 ? 80 : total >= 750 ? 40 : total >= 250 ? 16 : 4;
+	const minIntervalMs = total >= 1000 ? 900 : total >= 250 ? 500 : 250;
+	return current === total
+		|| current <= 3
+		|| (current % interval === 0 && Date.now() - lastPreviewAt >= minIntervalMs);
 }
 
 async function mapWithConcurrency<TInput, TOutput>(

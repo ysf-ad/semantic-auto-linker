@@ -238,6 +238,88 @@ test("exact title replacements use display title instead of full path", async ()
 	assert.equal(aliasAnalysis.suggestions[0]?.replacement, "[[Research/ML/Embeddings|dense vectors]]");
 });
 
+test("exact phrase matching can be disabled independently", async () => {
+	const sourceRecord = {
+		file: {
+			path: "Scratch.md",
+			fullPath: "Scratch.md",
+			basename: "Scratch",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Scratch.md",
+		linkTarget: "Scratch",
+		title: "Scratch",
+		aliases: [],
+		normalizedTitle: "scratch",
+		titleTokens: ["scratch"],
+		lookupKeys: ["scratch"],
+		tags: [],
+	};
+	const targetRecord = {
+		file: {
+			path: "Research/ML/Embeddings.md",
+			fullPath: "Research/ML/Embeddings.md",
+			basename: "Embeddings",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Research/ML/Embeddings.md",
+		linkTarget: "Research/ML/Embeddings",
+		title: "Embeddings",
+		aliases: ["dense vectors"],
+		normalizedTitle: "embedding",
+		titleTokens: ["embedding"],
+		lookupKeys: ["embedding", "dense vector"],
+		tags: [],
+	};
+	const index = {
+		getAll() {
+			return [sourceRecord, targetRecord];
+		},
+	};
+	const settings = {
+		firstOccurrenceOnly: true,
+		maxLinksPerNote: 12,
+		excludedFolders: [],
+		excludedFiles: [],
+		excludedTargetFiles: [],
+		enableExactMatching: false,
+		enableAliasMatching: true,
+		enableSemanticSuggestions: true,
+		skipHeadings: true,
+		seeAlsoHeading: "See also",
+		seeAlsoCount: 5,
+		semanticMode: false,
+		semanticProviderId: "ollama",
+		semanticTopK: 8,
+		semanticSummaryLength: 280,
+		semanticTransformersModel: "Xenova/all-MiniLM-L6-v2",
+		semanticTransformersDevice: "auto",
+		semanticOllamaBaseUrl: "http://127.0.0.1:11434",
+		semanticOllamaModel: "embeddinggemma",
+		semanticProjectionMetric: "cosine",
+		semanticExplorerLabelDistance: 620,
+		semanticDisplayThreshold: 0.3,
+		semanticAcceptanceThreshold: 0.6,
+		autoRefreshEnabled: true,
+		autoRefreshMinutes: 60,
+	};
+
+	const analysis = await analyzeNoteContent(sourceRecord, "Embeddings and dense vectors are useful.", index, settings, undefined);
+
+	assert.equal(analysis.suggestions.length, 0);
+});
+
+test("semantic suggestions can be disabled independently", async () => {
+	const harness = await createDevVaultHarness();
+	harness.settings.enableSemanticSuggestions = false;
+	const analysis = await harness.analyzeNote("Semantic Challenge Note.md");
+
+	assert.equal(analysis.suggestions.some((suggestion) => suggestion.matchType === "semantic"), false);
+	assert.ok(analysis.suggestions.some((suggestion) => suggestion.matchType !== "semantic"), "expected deterministic suggestions to remain enabled");
+});
+
 test("excluded target files are not suggested as deterministic matches", async () => {
 	const sourceRecord = {
 		file: {

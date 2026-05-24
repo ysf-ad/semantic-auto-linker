@@ -22,8 +22,10 @@ export async function analyzeNoteContent(
 	const existingTargets = new Set(extractExistingTargets(source));
 	const usedTargets = new Set(existingTargets);
 	const excludedTargetPaths = new Set(settings.excludedTargetFiles ?? []);
-	const candidates = buildCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths);
-	const acronymCandidates = buildAcronymCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths);
+	const exactMatchingEnabled = settings.enableExactMatching !== false;
+	const semanticSuggestionsEnabled = settings.enableSemanticSuggestions !== false;
+	const candidates = exactMatchingEnabled ? buildCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths) : new Map<number, Map<string, PhraseCandidate[]>>();
+	const acronymCandidates = exactMatchingEnabled ? buildAcronymCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths) : new Map<string, PhraseCandidate[]>();
 	const tokens = indexTokens(source);
 	const suggestions: LinkSuggestion[] = [];
 	const occupied = new Array<boolean>(tokens.length).fill(false);
@@ -36,7 +38,7 @@ export async function analyzeNoteContent(
 	const selectionStart = selection?.start ?? 0;
 	const selectionEnd = selection?.end ?? source.length;
 
-	for (let startIndex = 0; startIndex < tokens.length; startIndex += 1) {
+	for (let startIndex = 0; exactMatchingEnabled && startIndex < tokens.length; startIndex += 1) {
 		if (occupied[startIndex]) {
 			continue;
 		}
@@ -104,7 +106,7 @@ export async function analyzeNoteContent(
 
 	}
 
-	if (semanticIndex && settings.semanticMode && suggestions.length < displaySuggestionLimit) {
+	if (semanticIndex && settings.semanticMode && semanticSuggestionsEnabled && suggestions.length < displaySuggestionLimit) {
 		try {
 			const semanticSpans = buildSemanticSpanCandidates(tokens, source, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints);
 			if (semanticSpans.length > 0) {

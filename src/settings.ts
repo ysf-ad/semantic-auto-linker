@@ -9,7 +9,9 @@ export const DEFAULT_SETTINGS: SemanticAutoLinkerSettings = {
 	excludedFolders: [],
 	excludedFiles: [],
 	excludedTargetFiles: [],
+	enableExactMatching: true,
 	enableAliasMatching: true,
+	enableSemanticSuggestions: true,
 	skipHeadings: true,
 	seeAlsoHeading: "See also",
 	seeAlsoCount: 5,
@@ -68,8 +70,28 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Suggestion sources")
+			.setDesc("Choose which match types can create review suggestions.")
+			.addToggle((toggle) =>
+				toggle.setTooltip("Exact phrase matches")
+					.setValue(this.plugin.settings.enableExactMatching)
+					.onChange(async (value) => {
+						this.plugin.settings.enableExactMatching = value;
+						await this.plugin.saveSettings();
+					}),
+			)
+			.addToggle((toggle) =>
+				toggle.setTooltip("AI semantic matches")
+					.setValue(this.plugin.settings.enableSemanticSuggestions)
+					.onChange(async (value) => {
+						this.plugin.settings.enableSemanticSuggestions = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName("Alias matching")
-			.setDesc("Allow frontmatter aliases to generate suggestions.")
+			.setDesc("Allow frontmatter aliases to participate in exact phrase matching.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.enableAliasMatching).onChange(async (value) => {
 					this.plugin.settings.enableAliasMatching = value;
@@ -151,7 +173,7 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Semantic mode")
-			.setDesc("Enable semantic matching. The default local model downloads automatically and runs on this device.")
+			.setDesc("Build the semantic index for AI suggestions and explorer views. The default local model downloads automatically and runs on this device.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.semanticMode).onChange(async (value) => {
 					this.plugin.settings.semanticMode = value;

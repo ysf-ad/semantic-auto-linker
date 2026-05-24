@@ -21,7 +21,7 @@ const INLINE_CODE_REGEX = /`[^`]+`/g;
 const WIKILINK_REGEX = /\[\[([^[\]|#]+)(?:#[^[\]|]+)?(?:\|([^[\]]+))?]]/g;
 const MARKDOWN_LINK_REGEX = /!?\[([^[\]]+)]\([^)]+\)/g;
 const HEADING_REGEX = /^\s{0,3}#{1,6}\s+/gm;
-const EMBEDDING_BATCH_SIZE = 8;
+const DEFAULT_EMBEDDING_BATCH_SIZE = 8;
 
 export class SemanticIndex {
 	private app: App;
@@ -149,10 +149,10 @@ export class SemanticIndex {
 		let preparedCount = 0;
 
 		for (const note of notes) {
-			const source = await this.app.vault.read(note.file);
-			const summary = summarizeNote(source, this.settings.semanticSummaryLength);
-			const sourceText = buildSemanticSourceText(note, summary);
 			const cached = this.cache[note.path];
+			const cachedIsReusable = providerAvailable && cached && isCacheMetadataFresh(cached, note.file.stat.mtime, provider.id, modelId);
+			const summary = cachedIsReusable ? cached.summary : summarizeNote(await this.app.vault.read(note.file), this.settings.semanticSummaryLength);
+			const sourceText = cachedIsReusable ? cached.sourceText : buildSemanticSourceText(note, summary);
 
 			const record: SemanticNoteRecord = {
 				path: note.path,
@@ -167,7 +167,11 @@ export class SemanticIndex {
 				embedding: null,
 			};
 
-			if (providerAvailable && cached && isCacheFresh(cached, note.file.stat.mtime, provider.id, modelId, sourceText)) {
+			if (cachedIsReusable && cached.embedding) {
+				record.providerId = cached.providerId;
+				record.modelId = cached.modelId;
+				record.embedding = cached.embedding;
+			} else if (providerAvailable && cached && isCacheFresh(cached, note.file.stat.mtime, provider.id, modelId, sourceText)) {
 				record.providerId = cached.providerId;
 				record.modelId = cached.modelId;
 				record.embedding = cached.embedding;
@@ -189,8 +193,9 @@ export class SemanticIndex {
 			let embeddedCount = 0;
 			let activeProvider = provider;
 			let activeModelId = modelId;
-			for (let start = 0; start < notesToEmbed.length; start += EMBEDDING_BATCH_SIZE) {
-				const batch = notesToEmbed.slice(start, start + EMBEDDING_BATCH_SIZE);
+			let batchSize = getEmbeddingBatchSize(activeProvider.id, this.settings, notesToEmbed.length);
+			for (let start = 0; start < notesToEmbed.length; start += batchSize) {
+				const batch = notesToEmbed.slice(start, start + batchSize);
 				await notifyProgress(onProgress, {
 					stage: "embedding",
 					current: embeddedCount,
@@ -208,6 +213,7 @@ export class SemanticIndex {
 				}
 				activeProvider = vectors.provider;
 				activeModelId = vectors.modelId;
+				batchSize = getEmbeddingBatchSize(activeProvider.id, this.settings, notesToEmbed.length);
 
 				vectors.embeddings.forEach((vector, index) => {
 					const target = batch[index];
@@ -1184,6 +1190,35 @@ function isCacheFresh(
 		&& entry.modelId === modelId
 		&& entry.sourceText === sourceText
 		&& entry.embedding.length > 0;
+}
+
+function isCacheMetadataFresh(
+	entry: SemanticCacheEntry,
+	mtime: number,
+	providerId: string,
+	modelId: string,
+): boolean {
+	return entry.mtime === mtime
+		&& entry.providerId === providerId
+		&& entry.modelId === modelId
+		&& entry.sourceText.length > 0
+		&& entry.embedding.length > 0;
+}
+
+function getEmbeddingBatchSize(providerId: string, settings: SemanticAutoLinkerSettings, pendingCount: number): number {
+	if (pendingCount <= DEFAULT_EMBEDDING_BATCH_SIZE) {
+		return DEFAULT_EMBEDDING_BATCH_SIZE;
+	}
+	if (providerId === "ollama") {
+		return 64;
+	}
+	if (providerId === "local-fallback") {
+		return 128;
+	}
+	if (providerId === "transformers" && settings.semanticTransformersDevice !== "cpu") {
+		return 16;
+	}
+	return DEFAULT_EMBEDDING_BATCH_SIZE;
 }
 
 function cosineSimilarity(left: number[], right: number[]): number {
