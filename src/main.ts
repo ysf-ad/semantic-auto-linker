@@ -240,7 +240,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	}
 
 	async runVaultAnalysisFromView(): Promise<void> {
-		await this.openVaultReview();
+		await this.openVaultReview({ forceRefresh: true });
 	}
 
 	async showRelatedNotesFromView(): Promise<void> {
@@ -374,7 +374,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 			id: "analyze-whole-vault",
 			name: "Analyze whole vault for safe links",
 			callback: () => {
-				void this.openVaultReview();
+				void this.openVaultReview({ forceRefresh: true });
 			},
 		});
 
@@ -621,14 +621,15 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		}).open();
 	}
 
-	private async openVaultReview(): Promise<void> {
+	private async openVaultReview(options: { forceRefresh?: boolean } = {}): Promise<void> {
 		await this.ensureIndex();
 		if (this.activeVaultReviewModal) {
 			this.activeVaultReviewModal.close();
 		}
+		const showExistingAnalysis = !options.forceRefresh && !this.vaultAnalysisRunPromise;
 		const modal = new VaultReviewModal(
 			this.app,
-			this.lastVaultAnalysis,
+			showExistingAnalysis ? this.lastVaultAnalysis : null,
 			this.settings,
 			async (acceptedAnalysis, mode, useDisplayTitle) => {
 				await this.applyVaultAnalysis(acceptedAnalysis, mode, useDisplayTitle);
@@ -649,9 +650,34 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 			},
 		);
 		this.activeVaultReviewModal = modal;
+		if (options.forceRefresh) {
+			this.updateVaultAnalysisJobState({
+				status: "running",
+				mode: "full",
+				current: 0,
+				total: Math.max(1, this.index.getAll().length * 2),
+				message: "Starting whole-vault analysis...",
+				startedAt: Date.now(),
+				error: null,
+			});
+		}
 		modal.open();
-		modal.updateProgress(this.getVaultAnalysisJobState());
-		void this.ensureVaultAnalysisAvailable();
+		if (options.forceRefresh) {
+			modal.updateProgress(this.getVaultAnalysisJobState());
+		} else if (this.lastVaultAnalysis && (this.pendingVaultAnalysisPaths.size > 0 || this.analysisRevision !== this.vaultRevision)) {
+			this.updateVaultAnalysisJobState({
+				status: "running",
+				mode: "full",
+				current: 0,
+				total: Math.max(1, this.index.getAll().length * 2),
+				message: "Refreshing whole-vault analysis...",
+				startedAt: Date.now(),
+				error: null,
+			});
+		} else {
+			modal.updateProgress(this.getVaultAnalysisJobState());
+		}
+		void this.ensureVaultAnalysisAvailable(options.forceRefresh ?? false);
 	}
 
 	private recomputeVaultAnalysisPreview(analysis: VaultAnalysisResult): void {
@@ -872,11 +898,11 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		return Promise.resolve();
 	}
 
-	private async ensureVaultAnalysisAvailable(): Promise<void> {
+	private async ensureVaultAnalysisAvailable(forceRefresh = false): Promise<void> {
 		if (this.vaultAnalysisRunPromise) {
 			return this.vaultAnalysisRunPromise;
 		}
-		if (!this.lastVaultAnalysis) {
+		if (forceRefresh || !this.lastVaultAnalysis) {
 			return this.startVaultAnalysisRun("full");
 		}
 		if (this.pendingVaultAnalysisPaths.size > 0 || this.analysisRevision !== this.vaultRevision) {
@@ -959,7 +985,11 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	private handleVaultAnalysisProgress(progress: VaultAnalysisRunProgress): void {
 		if (progress.preview) {
 			removeSuggestionsForTargets(progress.preview, new Set(this.settings.excludedTargetFiles ?? []));
-			this.activeVaultReviewModal?.updateGraphPreview(progress.preview, progress.stage !== "analyzing" || progress.current <= 3);
+			try {
+				this.activeVaultReviewModal?.updateGraphPreview(progress.preview, progress.stage !== "analyzing" || progress.current <= 3);
+			} catch {
+				// Keep the scan alive if the optional live graph preview cannot render a partial result.
+			}
 		}
 		const records = Math.max(1, this.index.getAll().length);
 		const current = progress.stage === "reading"
@@ -1346,7 +1376,7 @@ function migrateLoadedSettings(settingsSource: Partial<SemanticAutoLinkerSetting
 }
 
 function isKnownSemanticProvider(providerId: string): boolean {
-	return providerId === "none" || providerId === "transformers" || providerId === "ollama";
+	return providerId === "none" || providerId === "transformers" || providerId === "local-fallback" || providerId === "ollama";
 }
 
 function hasOwnSetting(settingsSource: Partial<SemanticAutoLinkerSettings>, key: keyof SemanticAutoLinkerSettings): boolean {

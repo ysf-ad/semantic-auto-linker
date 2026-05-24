@@ -222,6 +222,10 @@ export class VaultReviewModal extends Modal {
 			this.graphPanel = new GraphPreviewPanel(this.app, this.graphHostEl, this.analysis, "after");
 		} else {
 			this.graphPlaceholderEl = this.graphHostEl.createDiv({
+				cls: "semantic-auto-linker-loading-overlay is-active",
+			});
+			this.graphPlaceholderEl.createDiv({ cls: "semantic-auto-linker-loading-spinner" });
+			this.graphPlaceholderEl.createDiv({
 				text: "Building whole-vault review and graph preview...",
 				cls: "semantic-auto-linker-empty-state",
 			});
@@ -658,7 +662,8 @@ export class VaultReviewModal extends Modal {
 		const ratio = progress.total > 0 ? Math.max(0, Math.min(1, progress.current / progress.total)) : 0;
 		this.progressShellEl.toggleClass("is-active", active || progress.status === "failed");
 		this.progressShellEl.toggleClass("is-error", progress.status === "failed");
-		this.progressFillEl.setCssProps({ width: `${Math.round(ratio * 100)}%` });
+		this.progressShellEl.toggleClass("is-indeterminate", active && progress.current === 0);
+		this.progressFillEl.setCssProps({ width: `${Math.max(active ? 4 : 0, Math.round(ratio * 100))}%` });
 		if (!active && progress.status !== "failed") {
 			this.progressCopyEl.setText(progress.message);
 			return;

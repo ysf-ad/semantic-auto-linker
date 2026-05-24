@@ -36,6 +36,36 @@ class DisabledSemanticProvider implements SemanticProvider {
 	}
 }
 
+class LocalFallbackSemanticProvider implements SemanticProvider {
+	readonly id = "local-fallback";
+	readonly label = "Local fallback (offline)";
+
+	getModelId(_settings: SemanticAutoLinkerSettings): string {
+		return "local-fallback:hash-384:v1";
+	}
+
+	checkAvailability(_settings: SemanticAutoLinkerSettings): Promise<SemanticProviderAvailability> {
+		return Promise.resolve({
+			available: true,
+			reason: null,
+		});
+	}
+
+	listModels(_settings: SemanticAutoLinkerSettings): Promise<SemanticProviderModel[]> {
+		return Promise.resolve([
+			{ id: this.getModelId(_settings), label: "Local fallback embeddings (offline)" },
+		]);
+	}
+
+	embed(text: string, _settings: SemanticAutoLinkerSettings): Promise<number[]> {
+		return Promise.resolve(buildFallbackEmbedding(text));
+	}
+
+	embedBatch(texts: string[], _settings: SemanticAutoLinkerSettings): Promise<number[][]> {
+		return Promise.resolve(texts.map(buildFallbackEmbedding));
+	}
+}
+
 class OllamaSemanticProvider implements SemanticProvider {
 	readonly id = "ollama";
 	readonly label = "Ollama (local)";
@@ -227,6 +257,7 @@ export class SemanticProviderRegistry {
 		this.providers = [
 			new DisabledSemanticProvider(),
 			new TransformersSemanticProvider(),
+			new LocalFallbackSemanticProvider(),
 			new OllamaSemanticProvider(),
 		];
 	}
@@ -408,4 +439,65 @@ function normalizeVector(vector: unknown): number[] {
 		throw new Error("Embedding vector is empty.");
 	}
 	return normalized;
+}
+
+function buildFallbackEmbedding(text: string): number[] {
+	const dimensions = 384;
+	const vector = new Array<number>(dimensions).fill(0);
+	const tokens = tokenizeFallbackText(text);
+	for (const token of tokens) {
+		const tokenHash = hashText(token);
+		const index = tokenHash % dimensions;
+		const sign = tokenHash % 2 === 0 ? 1 : -1;
+		const weight = 1 + Math.min(2, token.length / 8);
+		vector[index] = (vector[index] ?? 0) + sign * weight;
+		for (const gram of characterTrigrams(token)) {
+			const gramHash = hashText(gram);
+			const gramIndex = gramHash % dimensions;
+			vector[gramIndex] = (vector[gramIndex] ?? 0) + (gramHash % 2 === 0 ? 0.28 : -0.28);
+		}
+	}
+	return normalizeDenseVector(vector);
+}
+
+function tokenizeFallbackText(text: string): string[] {
+	return text
+		.toLowerCase()
+		.normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.match(/[a-z0-9][a-z0-9#+-]{1,}/g) ?? [];
+}
+
+function characterTrigrams(token: string): string[] {
+	if (token.length < 3) {
+		return [token];
+	}
+	const padded = ` ${token} `;
+	const grams: string[] = [];
+	for (let index = 0; index <= padded.length - 3; index += 1) {
+		grams.push(padded.slice(index, index + 3));
+	}
+	return grams;
+}
+
+function hashText(text: string): number {
+	let hash = 2166136261;
+	for (let index = 0; index < text.length; index += 1) {
+		hash ^= text.charCodeAt(index);
+		hash = Math.imul(hash, 16777619);
+	}
+	return hash >>> 0;
+}
+
+function normalizeDenseVector(vector: number[]): number[] {
+	let norm = 0;
+	for (const value of vector) {
+		norm += value * value;
+	}
+	if (norm === 0) {
+		vector[0] = 1;
+		return vector;
+	}
+	const scale = Math.sqrt(norm);
+	return vector.map((value) => value / scale);
 }

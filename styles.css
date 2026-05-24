@@ -113,6 +113,11 @@
 	background: linear-gradient(90deg, #7c3aed 0%, #a855f7 100%);
 }
 
+.semantic-auto-linker-vault-progress.is-indeterminate .semantic-auto-linker-vault-progress-fill {
+	width: 32% !important;
+	animation: semantic-auto-linker-indeterminate 1.1s ease-in-out infinite;
+}
+
 .semantic-auto-linker-vault-progress.is-error .semantic-auto-linker-vault-progress-fill {
 	background: linear-gradient(90deg, #ef4444 0%, #f87171 100%);
 }
@@ -1385,6 +1390,15 @@
 @keyframes semantic-auto-linker-spin {
 	to {
 		transform: rotate(360deg);
+	}
+}
+
+@keyframes semantic-auto-linker-indeterminate {
+	0% {
+		transform: translateX(-110%);
+	}
+	100% {
+		transform: translateX(330%);
 	}
 }
 

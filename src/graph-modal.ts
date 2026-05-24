@@ -146,8 +146,11 @@ export class GraphPreviewPanel {
 			.d3Force("charge", d3Force3d.forceManyBody().strength(-92) as never)
 			.d3Force("collision", createCollideForce((node) => 8 + Math.min(18, getNodeDegree(node) * 1.4)) as never)
 			.d3Force("radial", d3Force3d.forceRadial(150, 0, 0).strength(0.018) as never)
-			.d3Force("community", createCommunityForce() as never)
-			.d3Force("link", createLinkForce() as never);
+			.d3Force("community", createCommunityForce() as never);
+
+		const linkForce = this.graph.d3Force("link") as { distance?: (distance: number) => void; strength?: (strength: number) => void } | undefined;
+		linkForce?.distance?.(96);
+		linkForce?.strength?.(0.12);
 
 		this.resizeObserver = new ResizeObserver(() => {
 			if (!this.graphHostEl || !this.graph) {
@@ -183,9 +186,6 @@ export class GraphPreviewPanel {
 			.width(Math.max(320, this.graphHostEl.clientWidth))
 			.height(Math.max(360, this.graphHostEl.clientHeight))
 			.graphData(data);
-
-		const linkForce = this.graph.d3Force("link") as { links?: (links: ForceLink[]) => void } | undefined;
-		linkForce?.links?.(data.links);
 
 		if (!options.preserveLayout) {
 			this.fitOnNextEngineStop = options.refit;
@@ -250,7 +250,15 @@ function buildForceGraphData(
 	edges: GraphEdge[],
 	positionCache: Map<string, ForceNode>,
 ): { nodes: ForceNode[]; links: ForceLink[] } {
-	const communityByNode = assignCommunities(nodes, edges);
+	const nodeIds = new Set(nodes.map((node) => node.id));
+	const visibleEdges = edges
+		.map((edge) => ({
+			...edge,
+			source: getEndpointId(edge.source),
+			target: getEndpointId(edge.target),
+		}))
+		.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+	const communityByNode = assignCommunities(nodes, visibleEdges);
 	return {
 		nodes: nodes.map((node) => ({
 			id: node.id,
@@ -266,13 +274,24 @@ function buildForceGraphData(
 			fx: positionCache.get(node.id)?.fx,
 			fy: positionCache.get(node.id)?.fy,
 		})),
-		links: edges.map((edge) => ({
+		links: visibleEdges.map((edge) => ({
 			id: edge.id,
 			source: edge.source,
 			target: edge.target,
 			projected: edge.projected,
 		})),
 	};
+}
+
+function getEndpointId(endpoint: unknown): string {
+	if (typeof endpoint === "string") {
+		return endpoint;
+	}
+	if (endpoint && typeof endpoint === "object" && "id" in endpoint) {
+		const id = (endpoint as { id?: unknown }).id;
+		return typeof id === "string" ? id : "";
+	}
+	return "";
 }
 
 function assignCommunities(nodes: GraphNode[], edges: GraphEdge[]): Map<string, number> {
@@ -338,21 +357,6 @@ function createCommunityForce(): ((alpha: number) => void) & { initialize: (node
 		nodes = nextNodes;
 	};
 	return force;
-}
-
-function createLinkForce(): { initialize: (nodes: ForceNode[]) => void; links: (links: ForceLink[]) => void } & ((alpha: number) => void) {
-	const baseForce = d3Force3d.forceLink([]) as unknown as {
-		(alpha: number): void;
-		id: (callback: (node: ForceNode) => string) => typeof baseForce;
-		distance: (distance: number) => typeof baseForce;
-		strength: (strength: number) => typeof baseForce;
-		initialize: (nodes: ForceNode[]) => void;
-		links: (links: ForceLink[]) => void;
-	};
-	baseForce.id((node: ForceNode) => node.id);
-	baseForce.distance(96);
-	baseForce.strength(0.12);
-	return baseForce;
 }
 
 function createCollideForce(radiusForNode: (node: ForceNode) => number): ((alpha: number) => void) & { initialize: (nodes: ForceNode[]) => void } {

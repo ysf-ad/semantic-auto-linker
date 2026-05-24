@@ -72,7 +72,8 @@ export async function analyzeEntireVault(
 	});
 	let analyzedCount = 0;
 	let lastPreviewAt = 0;
-	await mapWithConcurrency(sources, 8, async ({ record, source }) =>
+	const analysisConcurrency = settings.semanticMode ? 2 : 8;
+	await mapWithConcurrency(sources, analysisConcurrency, async ({ record, source }) =>
 		await analyzeNoteContent(record, source, index, settings, semanticIndex),
 		async (analysis) => {
 			analyzedCount += 1;
@@ -94,6 +95,7 @@ export async function analyzeEntireVault(
 				message: `Analyzed ${analyzedCount}/${sources.length} note${sources.length === 1 ? "" : "s"}.`,
 				preview: shouldEmitPreview ? cloneVaultAnalysisForPreview(analysisResult) : undefined,
 			});
+			await yieldToUi();
 		},
 	);
 
@@ -106,6 +108,12 @@ export async function analyzeEntireVault(
 		preview: cloneVaultAnalysisForPreview(analysisResult),
 	});
 	return analysisResult;
+}
+
+function yieldToUi(): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, 0);
+	});
 }
 
 async function mapWithConcurrency<TInput, TOutput>(
