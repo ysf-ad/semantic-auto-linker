@@ -181,7 +181,8 @@ class TransformersSemanticProvider implements SemanticProvider {
 		}
 		return await this.runQueued(async () => {
 			const model = getTransformersModel(settings);
-			const extractor = await this.getExtractor(model);
+			const device = getTransformersDevice(settings);
+			const extractor = await this.getExtractor(model, device);
 			const output = await extractor(texts.length === 1 ? texts[0] ?? "" : texts, {
 				pooling: "mean",
 				normalize: true,
@@ -190,13 +191,17 @@ class TransformersSemanticProvider implements SemanticProvider {
 		});
 	}
 
-	private getExtractor(model: string): Promise<TransformersExtractor> {
-		const existing = this.extractorByModel.get(model);
+	private getExtractor(model: string, configuredDevice: TransformersDevice): Promise<TransformersExtractor> {
+		const cacheKey = `${model}::${configuredDevice}`;
+		const existing = this.extractorByModel.get(cacheKey);
 		if (existing) {
 			return existing;
 		}
-		const next = loadTransformersExtractor(model);
-		this.extractorByModel.set(model, next);
+		const next = loadTransformersExtractor(model, configuredDevice).catch((error) => {
+			this.extractorByModel.delete(cacheKey);
+			throw error;
+		});
+		this.extractorByModel.set(cacheKey, next);
 		return next;
 	}
 
@@ -241,13 +246,49 @@ interface OllamaEmbedResponse {
 }
 
 type TransformersExtractor = (input: string | string[], options: { pooling: string; normalize: boolean }) => Promise<unknown>;
+type TransformersDevice = SemanticAutoLinkerSettings["semanticTransformersDevice"];
 
-async function loadTransformersExtractor(model: string): Promise<TransformersExtractor> {
+async function loadTransformersExtractor(model: string, configuredDevice: TransformersDevice): Promise<TransformersExtractor> {
 	const transformers = await import("@huggingface/transformers");
-	const extractor = await transformers.pipeline("feature-extraction", model, {
-		quantized: true,
-	} as object);
-	return extractor as TransformersExtractor;
+	const preferredDevices = getPreferredTransformersDevices(configuredDevice);
+	let fallbackError: unknown = null;
+	for (const device of preferredDevices) {
+		try {
+			const extractor = await transformers.pipeline("feature-extraction", model, {
+				quantized: true,
+				device,
+			} as object);
+			return extractor as TransformersExtractor;
+		} catch (error) {
+			fallbackError = error;
+			if (configuredDevice !== "auto") {
+				break;
+			}
+		}
+	}
+	if (fallbackError instanceof Error) {
+		throw fallbackError;
+	}
+	throw new Error("Could not load the local embedding model.");
+}
+
+function getPreferredTransformersDevices(configuredDevice: TransformersDevice): Array<"webgpu" | "cpu"> {
+	if (configuredDevice === "webgpu") {
+		return ["webgpu"];
+	}
+	if (configuredDevice === "cpu") {
+		return ["cpu"];
+	}
+	return hasWebGpuSupport() ? ["webgpu", "cpu"] : ["cpu"];
+}
+
+function hasWebGpuSupport(): boolean {
+	return typeof navigator !== "undefined" && "gpu" in navigator && Boolean(navigator.gpu);
+}
+
+function getTransformersDevice(settings: SemanticAutoLinkerSettings): TransformersDevice {
+	const device = settings.semanticTransformersDevice;
+	return device === "webgpu" || device === "cpu" ? device : "auto";
 }
 
 function getTransformersModel(settings: SemanticAutoLinkerSettings): string {

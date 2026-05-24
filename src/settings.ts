@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: SemanticAutoLinkerSettings = {
 	semanticTopK: 8,
 	semanticSummaryLength: 280,
 	semanticTransformersModel: "Xenova/all-MiniLM-L6-v2",
+	semanticTransformersDevice: "auto",
 	semanticOllamaBaseUrl: "http://127.0.0.1:11434",
 	semanticOllamaModel: "embeddinggemma",
 	semanticProjectionMetric: "cosine",
@@ -182,6 +183,21 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.semanticTransformersModel)
 					.onChange(async (value) => {
 						this.plugin.settings.semanticTransformersModel = value.trim() || DEFAULT_SETTINGS.semanticTransformersModel;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Local compute")
+			.setDesc("Auto tries graphics acceleration when Obsidian exposes it, then falls back to the processor.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("auto", "Auto")
+					.addOption("webgpu", "Graphics processor")
+					.addOption("cpu", "Processor")
+					.setValue(this.plugin.settings.semanticTransformersDevice)
+					.onChange(async (value) => {
+						this.plugin.settings.semanticTransformersDevice = value as SemanticAutoLinkerSettings["semanticTransformersDevice"];
 						await this.plugin.saveSettings();
 					}),
 			);

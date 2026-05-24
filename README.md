@@ -36,7 +36,8 @@ Current provider support:
 Typical setup:
 1. In Obsidian, open **Settings → Community plugins → Semantic Auto-Linker**.
 2. Keep **Semantic provider** set to **Local model (built-in)**.
-3. Run **Build semantic embeddings**. The default local model downloads automatically on first use and is cached locally.
+3. Keep **Local compute** set to **Auto**. It tries graphics acceleration when Obsidian exposes it, then falls back to the processor.
+4. Run **Build semantic embeddings**. The default local model downloads automatically on first use and is cached locally.
 
 Optional Ollama setup:
 1. Install and run [Ollama](https://ollama.com/).

@@ -210,6 +210,7 @@ function defaultSettings() {
 		semanticTopK: 8,
 		semanticSummaryLength: 280,
 		semanticTransformersModel: "Xenova/all-MiniLM-L6-v2",
+		semanticTransformersDevice: "auto",
 		semanticOllamaBaseUrl: "http://127.0.0.1:11434",
 		semanticOllamaModel: "embeddinggemma",
 		semanticProjectionMetric: "cosine",

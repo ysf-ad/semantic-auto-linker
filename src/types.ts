@@ -15,6 +15,7 @@ export interface SemanticAutoLinkerSettings {
 	semanticTopK: number;
 	semanticSummaryLength: number;
 	semanticTransformersModel: string;
+	semanticTransformersDevice: "auto" | "webgpu" | "cpu";
 	semanticOllamaBaseUrl: string;
 	semanticOllamaModel: string;
 	semanticProjectionMetric: "cosine" | "euclidean";
