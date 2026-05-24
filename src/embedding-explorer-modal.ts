@@ -47,6 +47,8 @@ export class EmbeddingExplorerModal extends Modal {
 	private points: SemanticProjectionPoint[] = [];
 	private currentNodes: ExplorerNode[] = [];
 	private labelFrame = 0;
+	private loadingOverlayEl: HTMLElement | null = null;
+	private projectionRunId = 0;
 
 	constructor(app: App, plugin: SemanticAutoLinkerPlugin, semanticIndex: SemanticIndex) {
 		super(app);
@@ -134,6 +136,7 @@ export class EmbeddingExplorerModal extends Modal {
 
 		this.summaryEl = contentEl.createDiv({ cls: "semantic-auto-linker-embedding-summary" });
 		this.graphHostEl = contentEl.createDiv({ cls: "semantic-auto-linker-embedding-host" });
+		this.loadingOverlayEl = this.graphHostEl.createDiv({ cls: "semantic-auto-linker-loading-overlay" });
 		const controlsHint = this.graphHostEl.createDiv({ cls: "semantic-auto-linker-embedding-controls-hint" });
 		controlsHint.setText("Drag: rotate  Shift+drag: pan  Scroll: zoom");
 		this.createGraph();
@@ -150,6 +153,7 @@ export class EmbeddingExplorerModal extends Modal {
 		this.graph?._destructor();
 		this.graph = null;
 		this.labelLayerEl = null;
+		this.loadingOverlayEl = null;
 		this.projectionSettingsEl = null;
 		this.currentNodes = [];
 		this.contentEl.empty();
@@ -202,8 +206,14 @@ export class EmbeddingExplorerModal extends Modal {
 	}
 
 	private async refreshProjection(forceNotice: boolean): Promise<void> {
+		const runId = ++this.projectionRunId;
+		this.setProjectionLoading(true, "Computing PCA projection...");
 		try {
-			this.points = await this.semanticIndex.buildProjection(this.dimensions, this.projectionScope);
+			const points = await this.semanticIndex.buildProjection(this.dimensions, this.projectionScope);
+			if (runId !== this.projectionRunId) {
+				return;
+			}
+			this.points = points;
 			this.renderGraph();
 			if (forceNotice) {
 				new Notice(`Updated ${this.projectionScope} PCA ${this.dimensions}D embedding view.`);
@@ -214,7 +224,24 @@ export class EmbeddingExplorerModal extends Modal {
 				this.summaryEl.empty();
 				this.summaryEl.createDiv({ text: `Projection failed: ${message}` });
 			}
+		} finally {
+			if (runId === this.projectionRunId) {
+				this.setProjectionLoading(false, "");
+			}
 		}
+	}
+
+	private setProjectionLoading(loading: boolean, message: string): void {
+		if (!this.loadingOverlayEl) {
+			return;
+		}
+		this.loadingOverlayEl.toggleClass("is-active", loading);
+		this.loadingOverlayEl.empty();
+		if (!loading) {
+			return;
+		}
+		this.loadingOverlayEl.createDiv({ cls: "semantic-auto-linker-loading-spinner" });
+		this.loadingOverlayEl.createDiv({ text: message, cls: "semantic-auto-linker-loading-message" });
 	}
 
 	private renderGraph(): void {

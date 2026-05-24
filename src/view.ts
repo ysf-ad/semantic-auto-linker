@@ -86,6 +86,12 @@ async function renderSidebarAutoLinkSuggestions(
 ): Promise<void> {
 	const previousList = containerEl.querySelector<HTMLDivElement>(".semantic-auto-linker-related-list");
 	const previousScrollTop = previousList?.scrollTop ?? 0;
+	if (!containerEl.querySelector(".semantic-auto-linker-loading-block")) {
+		containerEl.empty();
+		containerEl.createDiv({ text: "Auto-Link suggestions", cls: "semantic-auto-linker-section-title" });
+		containerEl.createDiv({ cls: "semantic-auto-linker-loading-block" });
+		containerEl.createDiv({ text: "Checking the active note...", cls: "semantic-auto-linker-empty-state" });
+	}
 	const related = await plugin.getSidebarAutoLinkSuggestions();
 	if (renderVersion !== getCurrentRenderVersion()) {
 		return;
@@ -295,17 +301,24 @@ function createRelatedRow(containerEl: HTMLElement, plugin: SemanticAutoLinkerPl
 	exclude.onclick = (event) => {
 		event.preventDefault();
 		event.stopPropagation();
-		void plugin.excludeTargetFromMatching(suggestion.targetPath, suggestion.targetTitle);
+		void withButtonBusy(exclude, "Excluding...", async () => {
+			card.addClass("is-pending");
+			await plugin.excludeTargetFromMatching(suggestion.targetPath, suggestion.targetTitle);
+		});
 	};
 
-	const apply = () => {
-		void plugin.applySidebarSuggestion(suggestion);
+	const apply = async () => {
+		await withElementBusy(card, "Applying...", async () => {
+			await plugin.applySidebarSuggestion(suggestion);
+		});
 	};
-	card.onclick = apply;
+	card.onclick = () => {
+		void apply();
+	};
 	card.onkeydown = (event) => {
 		if (event.key === "Enter" || event.key === " ") {
 			event.preventDefault();
-			apply();
+			void apply();
 		}
 	};
 }
@@ -316,7 +329,7 @@ function createActionButton(
 		label: string;
 		description: string;
 		icon: string;
-		onClick: () => void;
+		onClick: () => void | Promise<void>;
 		progress?: number | null;
 		badge?: string | null;
 		variant: "embeddings" | "vault" | "note" | "explorer" | "index";
@@ -348,5 +361,48 @@ function createActionButton(
 		setIcon(trailing, "arrow-right");
 	}
 
-	button.onclick = options.onClick;
+	button.onclick = () => {
+		void withElementBusy(button, "Working...", async () => {
+			await options.onClick();
+		});
+	};
+}
+
+async function withElementBusy(element: HTMLElement, busyLabel: string, action: () => Promise<void>): Promise<void> {
+	if (element.hasClass("is-loading")) {
+		return;
+	}
+	element.addClass("is-loading");
+	element.setAttribute("aria-busy", "true");
+	const busy = element.createSpan({ cls: "semantic-auto-linker-button-busy", text: busyLabel });
+	if (element instanceof HTMLButtonElement) {
+		element.disabled = true;
+	}
+	try {
+		await action();
+	} finally {
+		busy.remove();
+		element.removeClass("is-loading");
+		element.removeAttribute("aria-busy");
+		if (element instanceof HTMLButtonElement) {
+			element.disabled = false;
+		}
+	}
+}
+
+async function withButtonBusy(button: HTMLButtonElement, busyText: string, action: () => Promise<void>): Promise<void> {
+	if (button.disabled) {
+		return;
+	}
+	const previousText = button.textContent ?? "";
+	button.disabled = true;
+	button.addClass("is-loading");
+	button.setText(busyText);
+	try {
+		await action();
+	} finally {
+		button.disabled = false;
+		button.removeClass("is-loading");
+		button.setText(previousText);
+	}
 }

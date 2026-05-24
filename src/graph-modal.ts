@@ -1,5 +1,5 @@
 import ForceGraph, { type LinkObject, type NodeObject } from "force-graph";
-import { forceCenter, forceManyBody, forceRadial } from "d3-force-3d";
+import * as d3Force3d from "d3-force-3d";
 import { Modal, setIcon, type App } from "obsidian";
 import type { GraphEdge, GraphNode, VaultAnalysisResult } from "./types";
 
@@ -11,6 +11,7 @@ interface ForceNode extends NodeObject {
 	degreeBefore: number;
 	degreeAfter: number;
 	growth: boolean;
+	community: number;
 }
 
 interface ForceLink extends LinkObject<ForceNode> {
@@ -121,9 +122,10 @@ export class GraphPreviewPanel {
 			.linkDirectionalParticles((link) => (this.mode === "after" && link.projected ? 1 : 0))
 			.linkDirectionalParticleWidth(1.2)
 			.linkDirectionalParticleSpeed(0.004)
-			.cooldownTicks(90)
-			.d3VelocityDecay(0.34)
-			.d3AlphaDecay(0.045)
+			.warmupTicks(18)
+			.cooldownTicks(170)
+			.d3VelocityDecay(0.24)
+			.d3AlphaDecay(0.027)
 			.onNodeClick((node) => {
 				void this.app.workspace.openLinkText(node.id, "", true);
 			})
@@ -140,9 +142,12 @@ export class GraphPreviewPanel {
 			});
 
 		this.graph
-			.d3Force("center", forceCenter(0, 0) as never)
-			.d3Force("charge", forceManyBody().strength(-28) as never)
-			.d3Force("radial", forceRadial(84, 0, 0).strength(0.055) as never);
+			.d3Force("center", d3Force3d.forceCenter(0, 0) as never)
+			.d3Force("charge", d3Force3d.forceManyBody().strength(-92) as never)
+			.d3Force("collision", createCollideForce((node) => 8 + Math.min(18, getNodeDegree(node) * 1.4)) as never)
+			.d3Force("radial", d3Force3d.forceRadial(150, 0, 0).strength(0.018) as never)
+			.d3Force("community", createCommunityForce() as never)
+			.d3Force("link", createLinkForce() as never);
 
 		this.resizeObserver = new ResizeObserver(() => {
 			if (!this.graphHostEl || !this.graph) {
@@ -168,7 +173,7 @@ export class GraphPreviewPanel {
 			? getNodePositions(this.graph.graphData().nodes)
 			: new Map<string, ForceNode>();
 
-		const data = buildForceGraphData(
+	const data = buildForceGraphData(
 			this.analysis.graphPreview.nodes,
 			this.mode === "before" ? this.analysis.graphPreview.edgesBefore : this.analysis.graphPreview.edgesAfter,
 			positionCache,
@@ -178,6 +183,9 @@ export class GraphPreviewPanel {
 			.width(Math.max(320, this.graphHostEl.clientWidth))
 			.height(Math.max(360, this.graphHostEl.clientHeight))
 			.graphData(data);
+
+		const linkForce = this.graph.d3Force("link") as { links?: (links: ForceLink[]) => void } | undefined;
+		linkForce?.links?.(data.links);
 
 		if (!options.preserveLayout) {
 			this.fitOnNextEngineStop = options.refit;
@@ -242,6 +250,7 @@ function buildForceGraphData(
 	edges: GraphEdge[],
 	positionCache: Map<string, ForceNode>,
 ): { nodes: ForceNode[]; links: ForceLink[] } {
+	const communityByNode = assignCommunities(nodes, edges);
 	return {
 		nodes: nodes.map((node) => ({
 			id: node.id,
@@ -249,6 +258,7 @@ function buildForceGraphData(
 			degreeBefore: node.degreeBefore,
 			degreeAfter: node.degreeAfter,
 			growth: node.degreeAfter > node.degreeBefore,
+			community: communityByNode.get(node.id) ?? 0,
 			x: positionCache.get(node.id)?.x,
 			y: positionCache.get(node.id)?.y,
 			vx: positionCache.get(node.id)?.vx,
@@ -263,6 +273,122 @@ function buildForceGraphData(
 			projected: edge.projected,
 		})),
 	};
+}
+
+function assignCommunities(nodes: GraphNode[], edges: GraphEdge[]): Map<string, number> {
+	const adjacency = new Map<string, Set<string>>();
+	for (const node of nodes) {
+		adjacency.set(node.id, new Set<string>());
+	}
+	for (const edge of edges) {
+		adjacency.get(edge.source)?.add(edge.target);
+		adjacency.get(edge.target)?.add(edge.source);
+	}
+	const visited = new Set<string>();
+	const communities = new Map<string, number>();
+	let community = 0;
+	for (const node of [...nodes].sort((left, right) => right.degreeAfter - left.degreeAfter)) {
+		if (visited.has(node.id)) {
+			continue;
+		}
+		const queue = [node.id];
+		visited.add(node.id);
+		while (queue.length > 0) {
+			const current = queue.shift();
+			if (!current) {
+				continue;
+			}
+			communities.set(current, community);
+			for (const next of adjacency.get(current) ?? []) {
+				if (visited.has(next)) {
+					continue;
+				}
+				visited.add(next);
+				queue.push(next);
+			}
+		}
+		community += 1;
+	}
+	return communities;
+}
+
+function communityAnchor(community: number): { x: number; y: number } {
+	const angle = (community * 2.399963229728653) % (Math.PI * 2);
+	const radius = 145 + (community % 4) * 34;
+	return {
+		x: Math.cos(angle) * radius,
+		y: Math.sin(angle) * radius,
+	};
+}
+
+function getNodeDegree(node: ForceNode): number {
+	return Math.max(node.degreeBefore, node.degreeAfter);
+}
+
+function createCommunityForce(): ((alpha: number) => void) & { initialize: (nodes: ForceNode[]) => void } {
+	let nodes: ForceNode[] = [];
+	const force = (alpha: number) => {
+		for (const node of nodes) {
+			const anchor = communityAnchor(node.community);
+			node.vx = (node.vx ?? 0) + (anchor.x - (node.x ?? 0)) * 0.018 * alpha;
+			node.vy = (node.vy ?? 0) + (anchor.y - (node.y ?? 0)) * 0.018 * alpha;
+		}
+	};
+	force.initialize = (nextNodes: ForceNode[]) => {
+		nodes = nextNodes;
+	};
+	return force;
+}
+
+function createLinkForce(): { initialize: (nodes: ForceNode[]) => void; links: (links: ForceLink[]) => void } & ((alpha: number) => void) {
+	const baseForce = d3Force3d.forceLink([]) as unknown as {
+		(alpha: number): void;
+		id: (callback: (node: ForceNode) => string) => typeof baseForce;
+		distance: (distance: number) => typeof baseForce;
+		strength: (strength: number) => typeof baseForce;
+		initialize: (nodes: ForceNode[]) => void;
+		links: (links: ForceLink[]) => void;
+	};
+	baseForce.id((node: ForceNode) => node.id);
+	baseForce.distance(96);
+	baseForce.strength(0.12);
+	return baseForce;
+}
+
+function createCollideForce(radiusForNode: (node: ForceNode) => number): ((alpha: number) => void) & { initialize: (nodes: ForceNode[]) => void } {
+	let nodes: ForceNode[] = [];
+	const force = (alpha: number) => {
+		for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
+			const left = nodes[leftIndex];
+			if (!left) {
+				continue;
+			}
+			for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
+				const right = nodes[rightIndex];
+				if (!right) {
+					continue;
+				}
+				const dx = (right.x ?? 0) - (left.x ?? 0);
+				const dy = (right.y ?? 0) - (left.y ?? 0);
+				const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+				const minDistance = radiusForNode(left) + radiusForNode(right);
+				if (distance >= minDistance) {
+					continue;
+				}
+				const push = ((minDistance - distance) / distance) * 0.18 * alpha;
+				const offsetX = dx * push;
+				const offsetY = dy * push;
+				left.vx = (left.vx ?? 0) - offsetX;
+				left.vy = (left.vy ?? 0) - offsetY;
+				right.vx = (right.vx ?? 0) + offsetX;
+				right.vy = (right.vy ?? 0) + offsetY;
+			}
+		}
+	};
+	force.initialize = (nextNodes: ForceNode[]) => {
+		nodes = nextNodes;
+	};
+	return force;
 }
 
 function getNodePositions(nodes: ForceNode[]): Map<string, ForceNode> {

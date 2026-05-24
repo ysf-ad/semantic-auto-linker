@@ -100,12 +100,14 @@ export class LinkReviewModal extends Modal {
 		};
 
 		apply.onclick = async () => {
-			await this.onApply({
-				suggestions: this.analysis.suggestions.filter((suggestion) => suggestion.accepted),
-				mode: this.insertionMode,
-				useDisplayTitle: this.useDisplayTitle,
+			await withButtonBusy(apply, "Applying...", async () => {
+				await this.onApply({
+					suggestions: this.analysis.suggestions.filter((suggestion) => suggestion.accepted),
+					mode: this.insertionMode,
+					useDisplayTitle: this.useDisplayTitle,
+				});
+				this.close();
 			});
-			this.close();
 		};
 
 		const listEl = contentEl.createDiv({ cls: "semantic-auto-linker-list" });
@@ -139,9 +141,9 @@ export class LinkReviewModal extends Modal {
 	}
 
 	private async excludeTarget(targetPath: string, targetTitle: string): Promise<void> {
-		await this.onExcludeTarget?.(targetPath, targetTitle);
 		this.analysis.suggestions = this.analysis.suggestions.filter((suggestion) => suggestion.targetPath !== targetPath);
 		this.onOpen();
+		await this.onExcludeTarget?.(targetPath, targetTitle);
 	}
 }
 
@@ -269,8 +271,13 @@ export class VaultReviewModal extends Modal {
 			if (!this.analysis) {
 				return;
 			}
-			await this.onApply(this.analysis, this.insertionMode, this.useDisplayTitle);
-			this.close();
+			await withButtonBusy(apply, "Applying...", async () => {
+				if (!this.analysis) {
+					return;
+				}
+				await this.onApply(this.analysis, this.insertionMode, this.useDisplayTitle);
+				this.close();
+			});
 		};
 
 		this.renderControls(controlsRow);
@@ -637,7 +644,7 @@ export class VaultReviewModal extends Modal {
 			button.createSpan({ text: String(target.count), cls: "semantic-auto-linker-target-summary-count" });
 			button.title = `Exclude ${target.title} from matching`;
 			button.onclick = () => {
-				void this.excludeTarget(target.path, target.title);
+				void withButtonBusy(button, "Excluding...", () => this.excludeTarget(target.path, target.title));
 			};
 		}
 	}
@@ -691,7 +698,6 @@ export class VaultReviewModal extends Modal {
 	}
 
 	private async excludeTarget(targetPath: string, targetTitle: string): Promise<void> {
-		await this.onExcludeTarget?.(targetPath, targetTitle);
 		if (!this.analysis) {
 			return;
 		}
@@ -699,6 +705,7 @@ export class VaultReviewModal extends Modal {
 		this.onChange();
 		this.graphPanel?.updateAnalysis(this.analysis);
 		this.renderResultList();
+		await this.onExcludeTarget?.(targetPath, targetTitle);
 	}
 
 	private updateControlVisibility(): void {
@@ -773,8 +780,27 @@ function createSuggestionReviewRow(
 	excludeButton.onclick = (event) => {
 		event.preventDefault();
 		event.stopPropagation();
-		void options.onExcludeTarget?.();
+		void withButtonBusy(excludeButton, "Excluding...", async () => {
+			await options.onExcludeTarget?.();
+		});
 	};
+}
+
+async function withButtonBusy(button: HTMLButtonElement, busyText: string, action: () => Promise<void>): Promise<void> {
+	if (button.disabled) {
+		return;
+	}
+	const previousText = button.textContent ?? "";
+	button.disabled = true;
+	button.addClass("is-loading");
+	button.setText(busyText);
+	try {
+		await action();
+	} finally {
+		button.disabled = false;
+		button.removeClass("is-loading");
+		button.setText(previousText);
+	}
 }
 
 function removeTargetSuggestions(analysis: VaultAnalysisResult, targetPath: string): number {

@@ -296,6 +296,34 @@
 	color: var(--text-error);
 }
 
+.semantic-auto-linker-row-action-button.is-loading,
+.semantic-auto-linker-related-action.is-loading,
+.semantic-auto-linker-action-card.is-loading,
+.semantic-auto-linker-related-row.is-loading {
+	opacity: 0.72;
+	cursor: progress;
+	pointer-events: none;
+}
+
+.semantic-auto-linker-button-busy {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.semantic-auto-linker-button-busy::before {
+	content: "";
+	width: 12px;
+	height: 12px;
+	border: 2px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+	border-top-color: var(--interactive-accent);
+	border-radius: 999px;
+	animation: semantic-auto-linker-spin 720ms linear infinite;
+}
+
 .semantic-auto-linker-group {
 	display: flex;
 	flex-direction: column;
@@ -1258,6 +1286,38 @@
 	backdrop-filter: blur(5px);
 	pointer-events: none;
 }
+
+.semantic-auto-linker-loading-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 12;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	flex-direction: column;
+	gap: 10px;
+	background: color-mix(in srgb, var(--background-primary) 62%, transparent);
+	backdrop-filter: blur(2px);
+	pointer-events: none;
+}
+
+.semantic-auto-linker-loading-overlay.is-active {
+	display: flex;
+}
+
+.semantic-auto-linker-loading-spinner {
+	width: 28px;
+	height: 28px;
+	border: 3px solid color-mix(in srgb, var(--text-muted) 34%, transparent);
+	border-top-color: var(--interactive-accent);
+	border-radius: 999px;
+	animation: semantic-auto-linker-spin 720ms linear infinite;
+}
+
+.semantic-auto-linker-loading-message {
+	font-size: 12px;
+	color: var(--text-muted);
+}
 .semantic-auto-linker-setting-hint {
 	margin-top: 6px;
 	font-size: 12px;
@@ -1319,6 +1379,12 @@
 	}
 	100% {
 		background-position: -200% 0;
+	}
+}
+
+@keyframes semantic-auto-linker-spin {
+	to {
+		transform: rotate(360deg);
 	}
 }
 
