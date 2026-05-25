@@ -96,6 +96,48 @@ export class SemanticIndex {
 		this.cache = cache;
 	}
 
+	async hydrateFromCache(): Promise<void> {
+		const nextRecords = new Map<string, SemanticNoteRecord>();
+		let latestCacheUpdate: number | null = null;
+
+		for (const note of this.vaultIndex.getAll()) {
+			const cached = this.cache[note.path];
+			const cacheIsUsable = cached && isStoredCacheUsable(cached, note.file.stat.mtime);
+			const record: SemanticNoteRecord = {
+				path: note.path,
+				title: note.title,
+				aliases: note.aliases,
+				tags: note.tags,
+				summary: cacheIsUsable ? cached.summary : "",
+				sourceText: cacheIsUsable ? cached.sourceText : "",
+				mtime: note.file.stat.mtime,
+				providerId: cacheIsUsable ? cached.providerId : null,
+				modelId: cacheIsUsable ? cached.modelId : null,
+				embedding: cacheIsUsable ? cached.embedding : null,
+			};
+			if (cacheIsUsable) {
+				latestCacheUpdate = Math.max(latestCacheUpdate ?? 0, cached.updatedAt);
+			}
+			nextRecords.set(note.path, record);
+		}
+
+		this.records = nextRecords;
+		this.activeProviderId = this.pickActiveProviderId(nextRecords, this.settings.semanticProviderId) ?? null;
+		this.lastBuiltAt = latestCacheUpdate;
+		this.lastProviderAvailability = this.activeProviderId
+			? { available: true, reason: null }
+			: this.lastProviderAvailability;
+		this.queryVectorCache.clear();
+		this.queryResultCache.clear();
+		if (this.activeProviderId) {
+			await this.rebuildApproximateIndex(this.activeProviderId);
+		} else {
+			this.annIndex = null;
+			this.annPathById.clear();
+			this.searchableRecords = [];
+		}
+	}
+
 	invalidateFile(path: string): void {
 		this.records.delete(path);
 		this.queryResultCache.clear();
@@ -106,7 +148,7 @@ export class SemanticIndex {
 			return false;
 		}
 
-		const provider = this.getActiveProvider();
+		const provider = this.getConfiguredProvider();
 		const availability = await provider.checkAvailability(this.settings);
 		this.lastProviderAvailability = availability;
 		if (!availability.available) {
@@ -116,10 +158,13 @@ export class SemanticIndex {
 		const summary = summarizeNote(source, this.settings.semanticSummaryLength);
 		const sourceText = buildSemanticSourceText(note, summary);
 		const modelId = provider.getModelId(this.settings);
-		const vector = await this.embedSingleSafely(provider, provider.id, modelId, sourceText);
-		if (!vector) {
+		const vectors = await this.embedBatchWithFallback(provider, modelId, [sourceText]);
+		const vector = vectors?.embeddings[0];
+		if (!vectors || !vector) {
 			return false;
 		}
+		const activeProvider = vectors.provider;
+		const activeModelId = vectors.modelId;
 		const nextRecord: SemanticNoteRecord = {
 			path: note.path,
 			title: note.title,
@@ -128,15 +173,26 @@ export class SemanticIndex {
 			summary,
 			sourceText,
 			mtime: file.stat.mtime,
-			providerId: provider.id,
-			modelId,
+			providerId: activeProvider.id,
+			modelId: activeModelId,
 			embedding: vector,
 		};
 
 		this.records.set(note.path, nextRecord);
 		this.queryVectorCache.clear();
 		this.queryResultCache.clear();
-		await this.rebuildApproximateIndex(provider.id);
+		this.cache[note.path] = {
+			path: note.path,
+			providerId: activeProvider.id,
+			modelId: activeModelId,
+			mtime: file.stat.mtime,
+			sourceText,
+			summary,
+			embedding: vector,
+			updatedAt: Date.now(),
+		};
+		this.activeProviderId = activeProvider.id;
+		await this.rebuildApproximateIndex(activeProvider.id);
 
 		return true;
 	}
@@ -159,7 +215,7 @@ export class SemanticIndex {
 	}
 
 	async rebuild(onProgress?: (progress: SemanticBuildProgress) => void | Promise<void>): Promise<SemanticIndexStatus> {
-		const provider = this.getActiveProvider();
+		const provider = this.getConfiguredProvider();
 		await notifyProgress(onProgress, {
 			stage: "checking-provider",
 			current: 0,
@@ -227,7 +283,8 @@ export class SemanticIndex {
 			let activeProvider = provider;
 			let activeModelId = modelId;
 			let batchSize = getEmbeddingBatchSize(activeProvider.id, this.settings, notesToEmbed.length);
-			for (let start = 0; start < notesToEmbed.length; start += batchSize) {
+			let start = 0;
+			while (start < notesToEmbed.length) {
 				const batch = notesToEmbed.slice(start, start + batchSize);
 				await notifyProgress(onProgress, {
 					stage: "embedding",
@@ -269,6 +326,7 @@ export class SemanticIndex {
 				});
 				effectiveAvailability = { available: true, reason: null };
 				embeddedCount += batch.length;
+				start += batch.length;
 				await notifyProgress(onProgress, {
 					stage: "embedding",
 					current: embeddedCount,
@@ -286,7 +344,7 @@ export class SemanticIndex {
 
 		this.records = nextRecords;
 		this.lastBuiltAt = Date.now();
-		this.activeProviderId = this.pickActiveProviderId(nextRecords) ?? provider.id;
+		this.activeProviderId = this.pickActiveProviderId(nextRecords, provider.id) ?? provider.id;
 		this.lastProviderAvailability = effectiveAvailability;
 		this.queryVectorCache.clear();
 		this.queryResultCache.clear();
@@ -646,16 +704,6 @@ export class SemanticIndex {
 		return this.queryVectorCache.get(buildQueryVectorCacheKey(providerId, modelId, query)) ?? null;
 	}
 
-	private async embedSingleSafely(
-		provider: ReturnType<SemanticProviderRegistry["getById"]>,
-		providerId: string,
-		modelId: string,
-		text: string,
-	): Promise<number[] | null> {
-		const [vector] = (await this.embedBatchSafely(provider, providerId, modelId, [text])) ?? [];
-		return vector ?? null;
-	}
-
 	private async embedBatchSafely(
 		provider: ReturnType<SemanticProviderRegistry["getById"]>,
 		providerId: string,
@@ -703,7 +751,7 @@ export class SemanticIndex {
 	private getEmbeddingFallbackProviders(providerId: string): Array<ReturnType<SemanticProviderRegistry["getById"]>> {
 		const fallbackIds = providerId === "ollama"
 			? ["local-fallback"]
-			: ["ollama", "local-fallback"];
+			: ["local-fallback", "ollama"];
 		return fallbackIds
 			.map((id) => this.registry.getById(id))
 			.filter((provider) => provider.id !== providerId);
@@ -713,13 +761,20 @@ export class SemanticIndex {
 		return this.registry.getById(this.activeProviderId ?? this.settings.semanticProviderId);
 	}
 
-	private pickActiveProviderId(records: Map<string, SemanticNoteRecord>): string | null {
+	private getConfiguredProvider(): ReturnType<SemanticProviderRegistry["getById"]> {
+		return this.registry.getById(this.settings.semanticProviderId);
+	}
+
+	private pickActiveProviderId(records: Map<string, SemanticNoteRecord>, preferredProviderId?: string): string | null {
 		const counts = new Map<string, number>();
 		for (const record of records.values()) {
 			if (!record.providerId || !record.embedding) {
 				continue;
 			}
 			counts.set(record.providerId, (counts.get(record.providerId) ?? 0) + 1);
+		}
+		if (preferredProviderId && (counts.get(preferredProviderId) ?? 0) > 0) {
+			return preferredProviderId;
 		}
 		return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
 	}
@@ -1379,6 +1434,19 @@ function isCacheMetadataFresh(
 		&& entry.providerId === providerId
 		&& entry.modelId === modelId
 		&& entry.sourceText.length > 0
+		&& entry.embedding.length > 0;
+}
+
+function isStoredCacheUsable(entry: SemanticCacheEntry, mtime: number): boolean {
+	return entry.mtime === mtime
+		&& typeof entry.providerId === "string"
+		&& entry.providerId.length > 0
+		&& typeof entry.modelId === "string"
+		&& entry.modelId.length > 0
+		&& typeof entry.sourceText === "string"
+		&& entry.sourceText.length > 0
+		&& typeof entry.summary === "string"
+		&& Array.isArray(entry.embedding)
 		&& entry.embedding.length > 0;
 }
 

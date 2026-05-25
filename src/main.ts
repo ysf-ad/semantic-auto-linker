@@ -131,6 +131,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	async rebuildIndex(successMessage?: string): Promise<void> {
 		this.index.updateSettings(this.settings);
 		await this.index.rebuild();
+		await this.semanticIndex.hydrateFromCache();
 		this.indexReady = true;
 		this.bumpVaultRevision();
 		if (successMessage) {

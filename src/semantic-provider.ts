@@ -1,6 +1,10 @@
 import { requestUrl } from "obsidian";
 import type { SemanticAutoLinkerSettings, SemanticProviderModel } from "./types";
 
+const TRANSFORMERS_IMPORT_TIMEOUT_MS = 20_000;
+const TRANSFORMERS_MODEL_LOAD_TIMEOUT_MS = 45_000;
+const TRANSFORMERS_INFERENCE_TIMEOUT_MS = 30_000;
+
 export interface SemanticProviderAvailability {
 	available: boolean;
 	reason: string | null;
@@ -213,10 +217,14 @@ class TransformersSemanticProvider implements SemanticProvider {
 			const model = getTransformersModel(settings);
 			const device = getTransformersDevice(settings);
 			const extractor = await this.getExtractor(model, device);
-			const output = await extractor(texts.length === 1 ? texts[0] ?? "" : texts, {
-				pooling: "mean",
-				normalize: true,
-			});
+			const output = await withTimeout(
+				extractor(texts.length === 1 ? texts[0] ?? "" : texts, {
+					pooling: "mean",
+					normalize: true,
+				}),
+				TRANSFORMERS_INFERENCE_TIMEOUT_MS,
+				"Local embedding inference timed out. Falling back to offline embeddings.",
+			);
 			return tensorOutputToVectors(output, texts.length);
 		});
 	}
@@ -280,15 +288,23 @@ type TransformersExtractor = (input: string | string[], options: { pooling: stri
 type TransformersDevice = SemanticAutoLinkerSettings["semanticTransformersDevice"];
 
 async function loadTransformersExtractor(model: string, configuredDevice: TransformersDevice): Promise<TransformersExtractor> {
-	const transformers = await import("@huggingface/transformers");
+	const transformers = await withTimeout(
+		import("@huggingface/transformers"),
+		TRANSFORMERS_IMPORT_TIMEOUT_MS,
+		"Local embedding runtime did not load in time. Falling back to offline embeddings.",
+	);
 	const preferredDevices = getPreferredTransformersDevices(configuredDevice);
 	let fallbackError: unknown = null;
 	for (const device of preferredDevices) {
 		try {
-			const extractor = await transformers.pipeline("feature-extraction", model, {
-				quantized: true,
-				device,
-			} as object);
+			const extractor = await withTimeout(
+				transformers.pipeline("feature-extraction", model, {
+					quantized: true,
+					device,
+				} as object),
+				TRANSFORMERS_MODEL_LOAD_TIMEOUT_MS,
+				`Local embedding model "${model}" did not load in time on ${device}. Falling back to offline embeddings.`,
+			);
 			return extractor as TransformersExtractor;
 		} catch (error) {
 			fallbackError = error;
@@ -301,6 +317,18 @@ async function loadTransformersExtractor(model: string, configuredDevice: Transf
 		throw fallbackError;
 	}
 	throw new Error("Could not load the local embedding model.");
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+	let timeoutId: ReturnType<typeof setTimeout> | null = null;
+	const timeout = new Promise<never>((_resolve, reject) => {
+		timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+	});
+	return Promise.race([promise, timeout]).finally(() => {
+		if (timeoutId !== null) {
+			clearTimeout(timeoutId);
+		}
+	});
 }
 
 function getPreferredTransformersDevices(configuredDevice: TransformersDevice): Array<"webgpu" | "cpu"> {

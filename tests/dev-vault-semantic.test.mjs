@@ -6,6 +6,7 @@ import { createDevVaultHarness } from "./dev-vault-harness.mjs";
 
 const jiti = createJiti(import.meta.url);
 const { analyzeNoteContent } = await jiti.import("../src/matcher.ts");
+const { SemanticIndex } = await jiti.import("../src/semantic-index.ts");
 
 test("semantic challenge note keeps strong deterministic matches and avoids benchmark/meta targets", async () => {
 	const harness = await createDevVaultHarness();
@@ -15,6 +16,93 @@ test("semantic challenge note keeps strong deterministic matches and avoids benc
 	assert.ok(targetTitles.includes("On-Device Models"));
 	assert.ok(targetTitles.includes("Pluggable Backends"));
 	assert.ok(!targetTitles.includes("Semantic Benchmark Map"));
+});
+
+test("semantic rebuild continues all notes after provider fallback changes batch size", async () => {
+	const notes = Array.from({ length: 57 }, (_value, index) => ({
+		path: `Note ${index + 1}.md`,
+		title: `Note ${index + 1}`,
+		aliases: [],
+		tags: [],
+		linkTarget: `Note ${index + 1}`,
+		file: {
+			path: `Note ${index + 1}.md`,
+			basename: `Note ${index + 1}`,
+			stat: { mtime: 1000 + index },
+		},
+	}));
+	const cache = {};
+	const failingProvider = {
+		id: "transformers",
+		label: "Local model (built-in)",
+		getModelId: () => "transformers:test",
+		checkAvailability: async () => ({ available: true, reason: null }),
+		embedBatch: async () => {
+			throw new Error("simulated local model failure");
+		},
+		embed: async () => {
+			throw new Error("simulated local model failure");
+		},
+	};
+	const fallbackProvider = {
+		id: "local-fallback",
+		label: "Local fallback (offline)",
+		getModelId: () => "local-fallback:test",
+		checkAvailability: async () => ({ available: true, reason: null }),
+		embedBatch: async (texts) => texts.map((_text, index) => [1, index + 1, 0, 0]),
+		embed: async () => [1, 0, 0, 0],
+	};
+	const registry = {
+		getById(id) {
+			if (id === "transformers") {
+				return failingProvider;
+			}
+			if (id === "local-fallback") {
+				return fallbackProvider;
+			}
+			return {
+				id,
+				label: id,
+				getModelId: () => `${id}:test`,
+				checkAvailability: async () => ({ available: false, reason: "not configured" }),
+				embedBatch: async () => [],
+				embed: async () => [],
+			};
+		},
+	};
+	const semanticIndex = new SemanticIndex(
+		{
+			vault: {
+				read: async (file) => `content for ${file.path}`,
+			},
+		},
+		{
+			getAll: () => notes,
+			get size() {
+				return notes.length;
+			},
+		},
+		registry,
+		{
+			semanticMode: true,
+			semanticProviderId: "transformers",
+			semanticSummaryLength: 280,
+			semanticTransformersDevice: "auto",
+			semanticProjectionMetric: "cosine",
+			excludedTargetFiles: [],
+			genericTargetTerms: [],
+			skipStructuralTargets: false,
+			structuralTargetPatterns: [],
+		},
+		cache,
+	);
+
+	const status = await semanticIndex.rebuild();
+
+	assert.equal(status.providerId, "local-fallback");
+	assert.equal(status.cachedCount, notes.length);
+	assert.equal(status.pendingCount, 0);
+	assert.equal(Object.keys(cache).length, notes.length);
 });
 
 test("semantic suggestions use tighter anchors", async () => {
