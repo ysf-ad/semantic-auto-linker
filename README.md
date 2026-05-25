@@ -1,15 +1,53 @@
-# Semantic Auto-Linker
+<p align="center">
+  <img src="assets/logo.svg" alt="Semantic Auto-Linker logo" width="360">
+</p>
 
-Semantic Auto-Linker is an Obsidian community plugin for safe, reviewable wiki-link insertion with optional local semantic retrieval.
+<h1 align="center">Semantic Auto-Linker</h1>
+
+<p align="center">
+  <a href="https://github.com/ysf-ad/semantic-auto-linker/stargazers"><img src="https://img.shields.io/github/stars/ysf-ad/semantic-auto-linker?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/ysf-ad/semantic-auto-linker/releases"><img src="https://img.shields.io/github/v/release/ysf-ad/semantic-auto-linker" alt="Latest release"></a>
+</p>
+
+Semantic Auto-Linker is an Obsidian community plugin for safe, reviewable wiki-link insertion with local semantic retrieval.
+
+If Semantic Auto-Linker saves you time, consider starring the repo. Stars help other Obsidian users find the plugin.
 
 It focuses on two things:
 - safe inline linking with review before write
 - vault-wide review with graph impact and semantic exploration
 
+## Preview links before applying them
+
+![Before and after vault graph](assets/before-after.png)
+
+Semantic Auto-Linker previews how accepted suggestions reshape your vault graph before anything is written.
+
+## Watch whole-vault review build live
+
+![Live whole-vault graph build](assets/live-graph-build.gif)
+
+Run a vault-wide scan, choose exact matches, AI matches, or both, and review every suggestion while the graph preview updates. You can close the modal while the scan continues in the background.
+
+## Suggestions while you write
+
+![Live sidebar suggestions](assets/live-suggestions.png)
+
+Keep a sidebar open for contextual link suggestions with confidence, source type, context, and one-click target exclusion.
+
+## Explore your semantic note space
+
+![Embedding explorer with semantic projection](assets/embedding-explorer.png)
+
+The embedding explorer projects your vault into a semantic space, where similar notes appear closer together. Explore notes or extracted concepts, switch between 2D and 3D views, and choose cosine or Euclidean distance for projection.
+
+Click any note to open it, inspect nearby ideas, and use the pairwise neighborhood matrix to understand how concepts and notes relate across your vault.
+
 ## Features
 
 - Analyze the current note and review suggested inline `[[links]]`
 - Analyze the whole vault and review suggestions before applying
+- Choose exact matches, AI matches, or both before each whole-vault scan
 - Exclude noisy target notes directly from review rows or settings
 - Switch insertion mode per review:
   - `Inline` updates matched text in place
@@ -21,7 +59,7 @@ It focuses on two things:
   - skip self-links
   - avoid duplicate link targets in the same note
 - Deterministic matching for titles, aliases, normalization, and acronyms
-- Optional semantic retrieval with a local Ollama embedding model
+- Local semantic retrieval with a built-in embedding model or Ollama
 - Embedding explorer with PCA note/concept views
 - Persistent whole-vault review state with background refresh when notes change
 

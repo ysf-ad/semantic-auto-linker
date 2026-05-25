@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 300" role="img" aria-labelledby="title desc">
+	<title id="title">Semantic Auto-Linker logo</title>
+	<desc id="desc">Two bracket shapes around connected nodes with a dotted semantic orbit.</desc>
+	<defs>
+		<linearGradient id="nodeGradient" x1="145" y1="150" x2="365" y2="150" gradientUnits="userSpaceOnUse">
+			<stop offset="0" stop-color="#8b5cf6"/>
+			<stop offset="1" stop-color="#3b82f6"/>
+		</linearGradient>
+		<linearGradient id="bracketGradient" x1="92" y1="40" x2="420" y2="260" gradientUnits="userSpaceOnUse">
+			<stop offset="0" stop-color="#47515d"/>
+			<stop offset="1" stop-color="#1f2630"/>
+		</linearGradient>
+		<filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+			<feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#111827" flood-opacity="0.18"/>
+		</filter>
+	</defs>
+	<rect width="512" height="300" rx="28" fill="#f8fafc"/>
+	<path
+		d="M153 48H119C104.6 48 93 59.6 93 74v152c0 14.4 11.6 26 26 26h34"
+		fill="none"
+		stroke="url(#bracketGradient)"
+		stroke-width="24"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		filter="url(#softShadow)"
+	/>
+	<path
+		d="M359 48h34c14.4 0 26 11.6 26 26v152c0 14.4-11.6 26-26 26h-34"
+		fill="none"
+		stroke="url(#bracketGradient)"
+		stroke-width="24"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		filter="url(#softShadow)"
+	/>
+	<circle
+		cx="256"
+		cy="150"
+		r="64"
+		fill="none"
+		stroke="#8b5cf6"
+		stroke-width="4"
+		stroke-linecap="round"
+		stroke-dasharray="10 14"
+		opacity="0.55"
+	/>
+	<path
+		d="M180 150H331"
+		fill="none"
+		stroke="url(#nodeGradient)"
+		stroke-width="12"
+		stroke-linecap="round"
+	/>
+	<circle cx="180" cy="150" r="26" fill="url(#nodeGradient)" filter="url(#softShadow)"/>
+	<circle cx="331" cy="150" r="26" fill="url(#nodeGradient)" filter="url(#softShadow)"/>
+	<circle cx="291" cy="88" r="9" fill="#8b5cf6" filter="url(#softShadow)"/>
+</svg>
