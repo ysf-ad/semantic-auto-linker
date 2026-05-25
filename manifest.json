@@ -1,7 +1,7 @@
 {
 	"id": "semantic-auto-linker",
 	"name": "Semantic Auto-Linker",
-	"version": "1.0.11",
+	"version": "1.0.12",
 	"minAppVersion": "1.5.0",
 	"description": "Safe, reviewable auto-linking with local semantic retrieval, vault-wide analysis, and embedding exploration.",
 	"author": "ysf-ad",

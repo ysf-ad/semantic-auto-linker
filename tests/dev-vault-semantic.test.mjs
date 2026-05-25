@@ -8,6 +8,62 @@ const jiti = createJiti(import.meta.url);
 const { analyzeNoteContent } = await jiti.import("../src/matcher.ts");
 const { SemanticIndex } = await jiti.import("../src/semantic-index.ts");
 
+function createTestRecord(path, title, aliases = []) {
+	return {
+		file: {
+			path,
+			fullPath: path,
+			basename: title,
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path,
+		linkTarget: path.replace(/\.md$/i, ""),
+		title,
+		aliases,
+		normalizedTitle: title.toLowerCase(),
+		titleTokens: title.toLowerCase().split(/\s+/),
+		lookupKeys: [title.toLowerCase(), ...aliases.map((alias) => alias.toLowerCase())],
+		tags: [],
+	};
+}
+
+function createTestSettings(overrides = {}) {
+	return {
+		firstOccurrenceOnly: true,
+		maxLinksPerNote: 12,
+		excludedFolders: [],
+		excludedFiles: [],
+		excludedTargetFiles: [],
+		excludedTargetPatterns: ["_Index*", "_index_*", "*/*_index_*"],
+		ignoredMatchTerms: ["file", "note", "page", "document", "item", "thing", "question", "answer", "look", "text", "textbook", "texbook", "lecture", "template", "source", "reference", "index", "map", "list"],
+		genericTargetTerms: ["file", "note", "page", "document", "item", "thing", "question", "answer", "look", "text", "textbook", "texbook", "lecture", "template", "source", "reference", "index", "map", "list"],
+		skipStructuralTargets: true,
+		structuralTargetPatterns: ["_Index*", "_index_*", "*/*_index_*"],
+		enableExactMatching: true,
+		enableAliasMatching: true,
+		enableSemanticSuggestions: true,
+		skipHeadings: true,
+		seeAlsoHeading: "See also",
+		seeAlsoCount: 5,
+		semanticMode: false,
+		semanticProviderId: "ollama",
+		semanticTopK: 8,
+		semanticSummaryLength: 280,
+		semanticTransformersModel: "Xenova/all-MiniLM-L6-v2",
+		semanticTransformersDevice: "auto",
+		semanticOllamaBaseUrl: "http://127.0.0.1:11434",
+		semanticOllamaModel: "embeddinggemma",
+		semanticProjectionMetric: "cosine",
+		semanticExplorerLabelDistance: 620,
+		semanticDisplayThreshold: 0.3,
+		semanticAcceptanceThreshold: 0.6,
+		autoRefreshEnabled: true,
+		autoRefreshMinutes: 60,
+		...overrides,
+	};
+}
+
 test("semantic challenge note keeps strong deterministic matches and avoids benchmark/meta targets", async () => {
 	const harness = await createDevVaultHarness();
 	const analysis = await harness.analyzeNote("Semantic Challenge Note.md");
@@ -476,6 +532,58 @@ test("excluded target files are not suggested as deterministic matches", async (
 	const analysis = await analyzeNoteContent(
 		sourceRecord,
 		"Files and file references should not all become noisy links.",
+		index,
+		settings,
+		undefined,
+	);
+
+	assert.equal(analysis.suggestions.length, 0);
+});
+
+test("excluded target wildcard patterns are not suggested as deterministic matches", async () => {
+	const sourceRecord = createTestRecord("Scratch.md", "Scratch");
+	const indexRecord = createTestRecord("Projects/_index_overview.md", "Project Index");
+	const index = {
+		getAll() {
+			return [sourceRecord, indexRecord];
+		},
+	};
+	const settings = createTestSettings({
+		excludedTargetPatterns: ["*_index_*"],
+		genericTargetTerms: [],
+		ignoredMatchTerms: [],
+		skipStructuralTargets: false,
+	});
+
+	const analysis = await analyzeNoteContent(
+		sourceRecord,
+		"Project Index should not become a link when the path matches a blocked wildcard.",
+		index,
+		settings,
+		undefined,
+	);
+
+	assert.equal(analysis.suggestions.length, 0);
+});
+
+test("ignored match terms are never linked", async () => {
+	const sourceRecord = createTestRecord("Scratch.md", "Scratch");
+	const filesRecord = createTestRecord("Files.md", "Files", ["file"]);
+	const index = {
+		getAll() {
+			return [sourceRecord, filesRecord];
+		},
+	};
+	const settings = createTestSettings({
+		excludedTargetPatterns: [],
+		genericTargetTerms: [],
+		ignoredMatchTerms: ["files", "file"],
+		skipStructuralTargets: false,
+	});
+
+	const analysis = await analyzeNoteContent(
+		sourceRecord,
+		"Files and file should remain plain text.",
 		index,
 		settings,
 		undefined,

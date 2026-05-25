@@ -599,7 +599,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 			await this.applyAnalysis(analysis, suggestions, undefined, mode, useDisplayTitle);
 		}, async (targetPath, targetTitle) => {
 			await this.excludeTargetFromMatching(targetPath, targetTitle);
-		}).open();
+		}, this.index.getAll()).open();
 	}
 
 	private async openReviewForSelection(editor: Editor): Promise<void> {
@@ -624,7 +624,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 			await this.applyAnalysis(analysis, suggestions, editor, mode, useDisplayTitle);
 		}, async (targetPath, targetTitle) => {
 			await this.excludeTargetFromMatching(targetPath, targetTitle);
-		}).open();
+		}, this.index.getAll()).open();
 	}
 
 	private async openVaultReview(options: { forceRefresh?: boolean } = {}): Promise<void> {
@@ -658,6 +658,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 			async (targetPath, targetTitle) => {
 				await this.excludeTargetFromMatching(targetPath, targetTitle);
 			},
+			this.index.getAll(),
 		);
 		this.activeVaultReviewModal = modal;
 		if (options.forceRefresh) {

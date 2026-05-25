@@ -68,7 +68,7 @@ export function buildAnalysisMatchingContext(
 			: [],
 		acronymStartLetters: buildAcronymStartLetters(acronymCandidates),
 		maxTokenLength,
-		semanticSingleWordHints: buildSemanticSingleWordHints(index, "", excludedTargetPaths),
+		semanticSingleWordHints: buildSemanticSingleWordHints(index, "", settings, excludedTargetPaths),
 	};
 }
 
@@ -96,7 +96,7 @@ export async function analyzeNoteContent(
 	const displaySuggestionLimit = settings.maxLinksPerNote > 0
 		? Math.max(settings.maxLinksPerNote * 3, settings.maxLinksPerNote + 8)
 		: Number.POSITIVE_INFINITY;
-	const semanticSingleWordHints = matchingContext?.semanticSingleWordHints ?? buildSemanticSingleWordHints(index, file.path, excludedTargetPaths);
+	const semanticSingleWordHints = matchingContext?.semanticSingleWordHints ?? buildSemanticSingleWordHints(index, file.path, settings, excludedTargetPaths);
 
 	const maxTokenLength = matchingContext?.maxTokenLength ?? Math.min(Math.max(...candidates.keys(), 1), MAX_EXACT_PHRASE_TOKENS);
 	const candidateLengthsByFirstToken = exactMatchingEnabled
@@ -149,6 +149,9 @@ export async function analyzeNoteContent(
 
 			const rawPhrase = analysisSource.slice(startToken.start, endToken.end);
 			const key = normalizeText(rawPhrase);
+			if (isIgnoredMatchTerm(key, settings)) {
+				continue;
+			}
 			const compactKey = compactNormalizeText(rawPhrase);
 			const matches = candidates.get(tokenLength)?.get(key) ?? candidates.get(tokenLength)?.get(compactKey) ?? [];
 			const acronymMatches = matches.length === 0
@@ -196,7 +199,7 @@ export async function analyzeNoteContent(
 
 	if (semanticIndex && settings.semanticMode && semanticSuggestionsEnabled && suggestions.length < displaySuggestionLimit) {
 		try {
-			const semanticSpans = buildSemanticSpanCandidates(tokens, analysisSource, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints);
+			const semanticSpans = buildSemanticSpanCandidates(tokens, analysisSource, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints, settings);
 			if (semanticSpans.length > 0) {
 				const documentQuery = buildDocumentSemanticQuery(semanticSpans, analysisSource, settings);
 				const documentMatches = documentQuery
@@ -421,6 +424,14 @@ function isLowSignalExactCandidate(
 	return true;
 }
 
+function isIgnoredMatchTerm(normalizedPhrase: string, settings: SemanticAutoLinkerSettings): boolean {
+	if (!normalizedPhrase) {
+		return false;
+	}
+	const ignoredTerms = settings.ignoredMatchTerms ?? [];
+	return ignoredTerms.some((term) => normalizeText(term) === normalizedPhrase);
+}
+
 function isStructuralAutoLinkTarget(note: NoteRecord): boolean {
 	const normalizedTitle = normalizeText(note.title);
 	const normalizedPath = normalizeText(note.path);
@@ -456,6 +467,13 @@ function matchesStructuralPattern(note: NoteRecord, pattern: string): boolean {
 	return regex.test(note.title) || regex.test(note.path);
 }
 
+function shouldExcludeTarget(note: NoteRecord, settings: SemanticAutoLinkerSettings, excludedTargetPaths: Set<string>): boolean {
+	if (excludedTargetPaths.has(note.path)) {
+		return true;
+	}
+	return (settings.excludedTargetPatterns ?? []).some((pattern) => matchesStructuralPattern(note, pattern));
+}
+
 function wildcardPatternToRegex(pattern: string): RegExp {
 	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&")
 		.replace(/\*/g, ".*")
@@ -479,7 +497,7 @@ export function collectSemanticQueryCandidatesForSource(
 	const occupied = new Array<boolean>(tokens.length).fill(false);
 	const selectionStart = selection?.start ?? 0;
 	const selectionEnd = selection?.end ?? source.length;
-	return buildSemanticSpanCandidates(tokens, source, occupied, protectedRanges, selectionStart, selectionEnd, new Set<string>())
+	return buildSemanticSpanCandidates(tokens, source, occupied, protectedRanges, selectionStart, selectionEnd, new Set<string>(), settings)
 		.map((span) => span.normalized);
 }
 
@@ -524,7 +542,7 @@ function buildCandidateMap(
 	const includeAliases = settings.enableAliasMatching;
 
 	for (const note of index.getAll()) {
-		if (note.path === currentPath || excludedTargetPaths.has(note.path)) {
+		if (note.path === currentPath || shouldExcludeTarget(note, settings, excludedTargetPaths)) {
 			continue;
 		}
 
@@ -568,7 +586,7 @@ function buildAcronymCandidateMap(
 	const includeAliases = settings.enableAliasMatching;
 
 	for (const note of index.getAll()) {
-		if (note.path === currentPath || excludedTargetPaths.has(note.path)) {
+		if (note.path === currentPath || shouldExcludeTarget(note, settings, excludedTargetPaths)) {
 			continue;
 		}
 		if (shouldSkipStructuralTarget(note, settings)) {
@@ -754,7 +772,7 @@ function extractExistingTargets(source: string): string[] {
 	).filter(Boolean);
 }
 
-function buildReplacement(targetLink: string, targetTitle: string, matchedText: string): string {
+export function buildReplacement(targetLink: string, targetTitle: string, matchedText: string): string {
 	if (normalizeText(matchedText) === normalizeText(targetTitle)) {
 		return `[[${targetTitle}]]`;
 	}
@@ -847,6 +865,7 @@ function buildSemanticSpanCandidates(
 	selectionStart: number,
 	selectionEnd: number,
 	singleWordHints: Set<string>,
+	settings: SemanticAutoLinkerSettings,
 ): SemanticSpanCandidate[] {
 	const spans: SemanticSpanCandidate[] = [];
 	const seen = new Set<string>();
@@ -882,7 +901,7 @@ function buildSemanticSpanCandidates(
 			if (hasInternalStopWords(normalized) && tokenLength > 2) {
 				continue;
 			}
-			if (!normalized || seen.has(normalized) || isLowSignalSemanticSpan(normalized)) {
+			if (!normalized || seen.has(normalized) || isIgnoredMatchTerm(normalized, settings) || isLowSignalSemanticSpan(normalized)) {
 				continue;
 			}
 			if (tokenLength === 1 && !isStrongSingleWordSemanticSpan(normalized, singleWordHints)) {
@@ -963,10 +982,10 @@ function hasInternalStopWords(normalized: string): boolean {
 	return parts.slice(1, -1).some((part) => STOP_WORDS.has(part) || LOW_SIGNAL_PREFIX_WORDS.has(part));
 }
 
-function buildSemanticSingleWordHints(index: VaultIndex, currentPath: string, excludedTargetPaths: Set<string>): Set<string> {
+function buildSemanticSingleWordHints(index: VaultIndex, currentPath: string, settings: SemanticAutoLinkerSettings, excludedTargetPaths: Set<string>): Set<string> {
 	const hints = new Set<string>();
 	for (const note of index.getAll()) {
-		if (note.path === currentPath || excludedTargetPaths.has(note.path) || !looksLikePersonRecord(note)) {
+		if (note.path === currentPath || shouldExcludeTarget(note, settings, excludedTargetPaths) || !looksLikePersonRecord(note)) {
 			continue;
 		}
 		const firstToken = note.titleTokens[0];

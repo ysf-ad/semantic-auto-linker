@@ -931,7 +931,12 @@ export class SemanticIndex {
 	}
 
 	private isExcludedTarget(path: string): boolean {
-		return (this.settings.excludedTargetFiles ?? []).includes(path);
+		if ((this.settings.excludedTargetFiles ?? []).includes(path)) {
+			return true;
+		}
+		const record = this.records.get(path);
+		const title = record?.title ?? path.replace(/\.md$/i, "").split("/").pop() ?? path;
+		return matchesAnyStructuralPattern(title, path, this.settings.excludedTargetPatterns ?? []);
 	}
 }
 
@@ -1043,6 +1048,9 @@ function getHybridNoLinkFloor(query: string, match: SemanticQueryMatch, settings
 	}
 	if (titleTerms.length === 1 && genericTerms.has(titleTerms[0] ?? "")) {
 		return 0.48;
+	}
+	if (matchesAnyStructuralPattern(match.targetTitle, match.targetPath, settings.excludedTargetPatterns ?? [])) {
+		return 0.9;
 	}
 	if (settings.skipStructuralTargets !== false && matchesAnyStructuralPattern(match.targetTitle, match.targetPath, settings.structuralTargetPatterns ?? FALLBACK_STRUCTURAL_TARGET_PATTERNS)) {
 		return 0.48;

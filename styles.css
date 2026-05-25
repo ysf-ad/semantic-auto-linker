@@ -349,6 +349,39 @@
 	font-size: 0.85em;
 }
 
+.semantic-auto-linker-retarget {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.semantic-auto-linker-retarget-label {
+	color: var(--text-muted);
+	font-size: 0.82em;
+	text-transform: uppercase;
+	letter-spacing: 0;
+}
+
+.semantic-auto-linker-retarget-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+	align-items: center;
+}
+
+.semantic-auto-linker-retarget-input {
+	width: 100%;
+}
+
+.semantic-auto-linker-retarget-status {
+	min-height: 16px;
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
 .semantic-auto-linker-row-actions {
 	display: flex;
 	align-items: flex-start;

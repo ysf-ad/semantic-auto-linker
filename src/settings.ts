@@ -5,6 +5,8 @@ import { formatMultilineSetting, splitMultilineSetting } from "./text-utils";
 
 export const DEFAULT_STRUCTURAL_TARGET_PATTERNS = [
 	"_Index*",
+	"_index_*",
+	"*/*_index_*",
 	"Index_*",
 	"Notes @??-??-??",
 	"????-??-??*",
@@ -13,6 +15,12 @@ export const DEFAULT_STRUCTURAL_TARGET_PATTERNS = [
 	"COMPILED NOTES*",
 	"*lecture notes*",
 	"templates/*",
+];
+
+export const DEFAULT_EXCLUDED_TARGET_PATTERNS = [
+	"_Index*",
+	"_index_*",
+	"*/*_index_*",
 ];
 
 export const DEFAULT_GENERIC_TARGET_TERMS = [
@@ -43,6 +51,8 @@ export const DEFAULT_SETTINGS: SemanticAutoLinkerSettings = {
 	excludedFolders: [],
 	excludedFiles: [],
 	excludedTargetFiles: [],
+	excludedTargetPatterns: DEFAULT_EXCLUDED_TARGET_PATTERNS,
+	ignoredMatchTerms: DEFAULT_GENERIC_TARGET_TERMS,
 	genericTargetTerms: DEFAULT_GENERIC_TARGET_TERMS,
 	skipStructuralTargets: true,
 	structuralTargetPatterns: DEFAULT_STRUCTURAL_TARGET_PATTERNS,
@@ -185,6 +195,19 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Excluded target patterns")
+			.setDesc("Add title/path wildcard patterns that are never suggested as link targets, such as *_index_*.")
+			.addTextArea((text) =>
+				text
+					.setPlaceholder(DEFAULT_EXCLUDED_TARGET_PATTERNS.join("\n"))
+					.setValue(formatMultilineSetting(this.plugin.settings.excludedTargetPatterns ?? DEFAULT_EXCLUDED_TARGET_PATTERNS))
+					.onChange(async (value) => {
+						this.plugin.settings.excludedTargetPatterns = splitMultilineSetting(value);
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName("Skip structural targets")
 			.setDesc("Avoid suggesting navigation, template, dated log, and placeholder notes as link targets. Explicit aliases still opt a note back into matching.")
 			.addToggle((toggle) =>
@@ -195,8 +218,21 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Ignored match terms")
+			.setDesc("Words or phrases in note text that should never be turned into auto-links.")
+			.addTextArea((text) =>
+				text
+					.setPlaceholder(DEFAULT_GENERIC_TARGET_TERMS.join("\n"))
+					.setValue(formatMultilineSetting(this.plugin.settings.ignoredMatchTerms ?? DEFAULT_GENERIC_TARGET_TERMS))
+					.onChange(async (value) => {
+						this.plugin.settings.ignoredMatchTerms = splitMultilineSetting(value);
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName("Generic target terms")
-			.setDesc("One-word titles that should not become broad auto-link targets unless an explicit alias or local context supports them.")
+			.setDesc("One-word note titles that should not become broad auto-link targets unless an explicit alias or local context supports them.")
 			.addTextArea((text) =>
 				text
 					.setPlaceholder(DEFAULT_GENERIC_TARGET_TERMS.join("\n"))

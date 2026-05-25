@@ -6,6 +6,8 @@ export interface SemanticAutoLinkerSettings {
 	excludedFolders: string[];
 	excludedFiles: string[];
 	excludedTargetFiles: string[];
+	excludedTargetPatterns: string[];
+	ignoredMatchTerms: string[];
 	genericTargetTerms: string[];
 	skipStructuralTargets: boolean;
 	structuralTargetPatterns: string[];

@@ -1,5 +1,6 @@
 import { Modal, setIcon, Setting } from "obsidian";
-import type { AnalysisResult, LinkSuggestion, RelatedNoteSuggestion, SemanticAutoLinkerSettings, VaultAnalysisJobState, VaultAnalysisResult } from "./types";
+import type { AnalysisResult, LinkSuggestion, NoteRecord, RelatedNoteSuggestion, SemanticAutoLinkerSettings, VaultAnalysisJobState, VaultAnalysisResult } from "./types";
+import { buildReplacement } from "./matcher";
 import { GraphPreviewPanel } from "./graph-modal";
 
 export type ReviewInsertionMode = "inline" | "footer";
@@ -10,6 +11,7 @@ type ApplyHandler = (payload: {
 	useDisplayTitle: boolean;
 }) => Promise<void>;
 type ExcludeTargetHandler = (targetPath: string, targetTitle: string) => Promise<void>;
+type RetargetHandler = (target: NoteRecord) => void;
 type VaultFilterMode = "all" | "semantic" | "deterministic" | "accepted" | "unchecked";
 type VaultGroupSortMode = "name" | "most-suggestions" | "highest-confidence" | "lowest-confidence";
 type VaultSuggestionSortMode = "document" | "highest-confidence" | "lowest-confidence";
@@ -106,6 +108,7 @@ export class LinkReviewModal extends Modal {
 	private onApply: ApplyHandler;
 	private onExcludeTarget: ExcludeTargetHandler | null;
 	private settings: SemanticAutoLinkerSettings;
+	private targetCandidates: NoteRecord[];
 	private insertionMode: ReviewInsertionMode = "inline";
 	private useDisplayTitle = true;
 
@@ -115,12 +118,14 @@ export class LinkReviewModal extends Modal {
 		settings: SemanticAutoLinkerSettings,
 		onApply: ApplyHandler,
 		onExcludeTarget: ExcludeTargetHandler | null = null,
+		targetCandidates: NoteRecord[] = [],
 	) {
 		super(app);
 		this.analysis = analysis;
 		this.settings = settings;
 		this.onApply = onApply;
 		this.onExcludeTarget = onExcludeTarget;
+		this.targetCandidates = targetCandidates;
 	}
 
 	onOpen(): void {
@@ -208,6 +213,8 @@ export class LinkReviewModal extends Modal {
 						await this.excludeTarget(suggestion.targetPath, suggestion.targetTitle);
 					}
 					: null,
+				targetCandidates: this.targetCandidates,
+				onRetarget: (target) => this.retargetSuggestion(suggestion, target),
 			});
 		}
 	}
@@ -232,6 +239,11 @@ export class LinkReviewModal extends Modal {
 		this.onOpen();
 		await this.onExcludeTarget?.(targetPath, targetTitle);
 	}
+
+	private retargetSuggestion(suggestion: LinkSuggestion, target: NoteRecord): void {
+		applySuggestionTarget(suggestion, target);
+		this.onOpen();
+	}
 }
 
 export class VaultReviewModal extends Modal {
@@ -240,6 +252,7 @@ export class VaultReviewModal extends Modal {
 	private onExcludeTarget: ExcludeTargetHandler | null;
 	private onChange: () => void;
 	private settings: SemanticAutoLinkerSettings;
+	private targetCandidates: NoteRecord[];
 	private graphPanel: GraphPreviewPanel | null = null;
 	private graphHostEl: HTMLElement | null = null;
 	private graphPlaceholderEl: HTMLElement | null = null;
@@ -271,10 +284,12 @@ export class VaultReviewModal extends Modal {
 		onChange: () => void,
 		onClosed?: () => void,
 		onExcludeTarget: ExcludeTargetHandler | null = null,
+		targetCandidates: NoteRecord[] = [],
 	) {
 		super(app);
 		this.analysis = analysis;
 		this.settings = settings;
+		this.targetCandidates = targetCandidates;
 		this.onApply = onApply;
 		this.onChange = onChange;
 		this.onClosed = onClosed;
@@ -609,6 +624,8 @@ export class VaultReviewModal extends Modal {
 							await this.excludeTarget(entry.suggestion.targetPath, entry.suggestion.targetTitle);
 						}
 						: null,
+					targetCandidates: this.targetCandidates,
+					onRetarget: (target) => this.retargetSuggestion(entry.suggestion, target),
 				});
 			}
 			return;
@@ -654,6 +671,8 @@ export class VaultReviewModal extends Modal {
 							await this.excludeTarget(suggestion.targetPath, suggestion.targetTitle);
 						}
 						: null,
+					targetCandidates: this.targetCandidates,
+					onRetarget: (target) => this.retargetSuggestion(suggestion, target),
 				});
 			}
 		}
@@ -871,6 +890,11 @@ export class VaultReviewModal extends Modal {
 		await this.onExcludeTarget?.(targetPath, targetTitle);
 	}
 
+	private retargetSuggestion(suggestion: LinkSuggestion, target: NoteRecord): void {
+		applySuggestionTarget(suggestion, target);
+		this.handleSuggestionStateChange();
+	}
+
 	private updateControlVisibility(): void {
 		const showGroups = this.suggestionSortMode === "document";
 		if (this.groupSortControlEl) {
@@ -898,6 +922,8 @@ function createSuggestionReviewRow(
 		contextLabel: string;
 		onToggle: () => void;
 		onExcludeTarget: (() => Promise<void>) | null;
+		targetCandidates: NoteRecord[];
+		onRetarget: RetargetHandler;
 	},
 ): void {
 	const row = containerEl.createDiv({ cls: "semantic-auto-linker-row" });
@@ -925,6 +951,7 @@ function createSuggestionReviewRow(
 		text: suggestion.context,
 		cls: "semantic-auto-linker-row-context",
 	});
+	createRetargetControl(details, suggestion, options.targetCandidates, options.onRetarget);
 
 	if (!options.onExcludeTarget) {
 		return;
@@ -947,6 +974,84 @@ function createSuggestionReviewRow(
 			await options.onExcludeTarget?.();
 		});
 	};
+}
+
+function createRetargetControl(
+	containerEl: HTMLElement,
+	suggestion: LinkSuggestion,
+	targetCandidates: NoteRecord[],
+	onRetarget: RetargetHandler,
+): void {
+	if (targetCandidates.length === 0) {
+		return;
+	}
+	const wrapper = containerEl.createDiv({ cls: "semantic-auto-linker-retarget" });
+	wrapper.createDiv({ text: "Override target", cls: "semantic-auto-linker-retarget-label" });
+	const row = wrapper.createDiv({ cls: "semantic-auto-linker-retarget-row" });
+	const input = row.createEl("input", {
+		type: "search",
+		cls: "semantic-auto-linker-retarget-input",
+		attr: {
+			placeholder: "Search note title or path",
+			"aria-label": `Override target for ${suggestion.matchedText}`,
+		},
+	});
+	const datalistId = `semantic-auto-linker-targets-${suggestion.id.replace(/[^a-z0-9_-]/gi, "-")}`;
+	input.setAttr("list", datalistId);
+	const datalist = row.createEl("datalist");
+	datalist.id = datalistId;
+	for (const target of targetCandidates.slice(0, 400)) {
+		datalist.createEl("option", { value: target.title }).setAttr("label", target.path);
+	}
+	const applyButton = row.createEl("button", {
+		text: "Use target",
+		attr: { type: "button" },
+	});
+	const status = wrapper.createDiv({ cls: "semantic-auto-linker-retarget-status" });
+	const apply = () => {
+		const target = findRetargetCandidate(input.value, targetCandidates);
+		if (!target) {
+			status.setText("No matching note found.");
+			return;
+		}
+		onRetarget(target);
+	};
+	input.onkeydown = (event) => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			apply();
+		}
+	};
+	applyButton.onclick = (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		apply();
+	};
+}
+
+function findRetargetCandidate(query: string, targetCandidates: NoteRecord[]): NoteRecord | null {
+	const normalized = query.trim().toLowerCase();
+	if (!normalized) {
+		return null;
+	}
+	return targetCandidates.find((target) =>
+		target.title.toLowerCase() === normalized
+		|| target.path.toLowerCase() === normalized
+		|| target.linkTarget.toLowerCase() === normalized,
+	) ?? targetCandidates.find((target) =>
+		target.title.toLowerCase().includes(normalized)
+		|| target.path.toLowerCase().includes(normalized),
+	) ?? null;
+}
+
+function applySuggestionTarget(suggestion: LinkSuggestion, target: NoteRecord): void {
+	suggestion.targetPath = target.path;
+	suggestion.targetTitle = target.title;
+	suggestion.targetLink = target.linkTarget;
+	suggestion.replacement = buildReplacement(target.linkTarget, target.title, suggestion.matchedText);
+	suggestion.reason = "manual override";
+	suggestion.confidence = 1;
+	suggestion.accepted = true;
 }
 
 async function withButtonBusy(button: HTMLButtonElement, busyText: string, action: () => Promise<void>): Promise<void> {
