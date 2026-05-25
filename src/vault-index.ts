@@ -100,6 +100,9 @@ export class VaultIndex {
 		if (this.settings.excludedFiles.includes(file.path)) {
 			return false;
 		}
+		if (isGeneratedDrawingMarkdown(file.path)) {
+			return false;
+		}
 
 		return !this.settings.excludedFolders.some((folder) =>
 			file.path === folder || file.path.startsWith(folder.endsWith("/") ? folder : `${folder}/`),
@@ -135,4 +138,12 @@ function parseAliases(aliases: string | string[] | undefined): string[] {
 		return uniqueStrings(aliases);
 	}
 	return uniqueStrings([aliases]);
+}
+
+export function isGeneratedDrawingMarkdown(path: string): boolean {
+	const normalizedPath = path.toLowerCase();
+	return normalizedPath.endsWith(".excalidraw.md")
+		|| normalizedPath.includes("/excalidraw/")
+		|| /(?:^|\/)drawing \d{4}-\d{2}-\d{2} .+\.md$/.test(normalizedPath)
+		|| /(?:^|\/)drawing @\d{2}-\d{2}-\d{2}\.md$/.test(normalizedPath);
 }

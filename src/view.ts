@@ -86,40 +86,66 @@ async function renderSidebarAutoLinkSuggestions(
 ): Promise<void> {
 	const previousList = containerEl.querySelector<HTMLDivElement>(".semantic-auto-linker-related-list");
 	const previousScrollTop = previousList?.scrollTop ?? 0;
-	if (!containerEl.querySelector(".semantic-auto-linker-loading-block")) {
+	let titleEl = containerEl.querySelector<HTMLDivElement>(".semantic-auto-linker-section-title");
+	let listEl = containerEl.querySelector<HTMLDivElement>(".semantic-auto-linker-related-list");
+	if (!titleEl || !listEl) {
 		containerEl.empty();
-		containerEl.createDiv({ text: "Auto-Link suggestions", cls: "semantic-auto-linker-section-title" });
-		containerEl.createDiv({ cls: "semantic-auto-linker-loading-block" });
-		containerEl.createDiv({ text: "Checking the active note...", cls: "semantic-auto-linker-empty-state" });
+		titleEl = containerEl.createDiv({ text: "Auto-Link suggestions", cls: "semantic-auto-linker-section-title" });
+		listEl = containerEl.createDiv({ cls: "semantic-auto-linker-related-list is-live" });
+		listEl.createDiv({ text: "Checking the active note...", cls: "semantic-auto-linker-empty-state" });
 	}
 	const related = await plugin.getSidebarAutoLinkSuggestions();
 	if (renderVersion !== getCurrentRenderVersion()) {
 		return;
 	}
 
-	containerEl.empty();
 	if (!related) {
-		return;
-	}
-
-	containerEl.createDiv({
-		text: `Auto-Link suggestions for ${related.noteTitle}`,
-		cls: "semantic-auto-linker-section-title",
-	});
-
-	if (related.suggestions.length === 0) {
-		containerEl.createDiv({
-			text: "No inline auto-link suggestions for the current note yet.",
-			cls: "semantic-auto-linker-empty-state",
+		titleEl.setText("Auto-link suggestions");
+		updateStableSuggestionList(listEl, "no-active-note", () => {
+			listEl.empty();
+			listEl.createDiv({ text: "Open a Markdown note to see suggestions.", cls: "semantic-auto-linker-empty-state" });
 		});
 		return;
 	}
 
-	const list = containerEl.createDiv({ cls: "semantic-auto-linker-related-list" });
-	for (const suggestion of related.suggestions) {
-		createRelatedRow(list, plugin, suggestion);
+	titleEl.setText(`Auto-Link suggestions for ${related.noteTitle}`);
+	const signature = buildSidebarSuggestionSignature(related.noteTitle, related.suggestions);
+
+	if (related.suggestions.length === 0) {
+		updateStableSuggestionList(listEl, signature, () => {
+			listEl.empty();
+			listEl.createDiv({
+				text: "No inline auto-link suggestions for the current note yet.",
+				cls: "semantic-auto-linker-empty-state",
+			});
+		});
+		return;
 	}
-	list.scrollTop = previousScrollTop;
+
+	updateStableSuggestionList(listEl, signature, () => {
+		listEl.empty();
+		for (const suggestion of related.suggestions) {
+			createRelatedRow(listEl, plugin, suggestion);
+		}
+		listEl.scrollTop = previousScrollTop;
+	});
+}
+
+function buildSidebarSuggestionSignature(noteTitle: string, suggestions: LinkSuggestion[]): string {
+	return [
+		noteTitle,
+		...suggestions.map((suggestion) =>
+			`${suggestion.id}:${suggestion.targetPath}:${suggestion.start}:${suggestion.end}:${suggestion.confidence.toFixed(3)}`,
+		),
+	].join("|");
+}
+
+function updateStableSuggestionList(listEl: HTMLDivElement, signature: string, update: () => void): void {
+	if (listEl.dataset.suggestionSignature === signature) {
+		return;
+	}
+	listEl.dataset.suggestionSignature = signature;
+	update();
 }
 
 function renderStatusSection(containerEl: HTMLElement, plugin: SemanticAutoLinkerPlugin): void {

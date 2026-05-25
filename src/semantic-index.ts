@@ -22,7 +22,39 @@ const WIKILINK_REGEX = /\[\[([^[\]|#]+)(?:#[^[\]|]+)?(?:\|([^[\]]+))?]]/g;
 const MARKDOWN_LINK_REGEX = /!?\[([^[\]]+)]\([^)]+\)/g;
 const HEADING_REGEX = /^\s{0,3}#{1,6}\s+/gm;
 const DEFAULT_EMBEDDING_BATCH_SIZE = 8;
-
+const SEMANTIC_READ_TIMEOUT_MS = 1_500;
+const FALLBACK_GENERIC_TARGET_TERMS = [
+	"file",
+	"note",
+	"page",
+	"document",
+	"item",
+	"thing",
+	"question",
+	"answer",
+	"look",
+	"text",
+	"textbook",
+	"texbook",
+	"lecture",
+	"template",
+	"source",
+	"reference",
+	"index",
+	"map",
+	"list",
+];
+const FALLBACK_STRUCTURAL_TARGET_PATTERNS = [
+	"_Index*",
+	"Index_*",
+	"Notes @??-??-??",
+	"????-??-??*",
+	"lecture ????-??-??*",
+	"Untitled*",
+	"COMPILED NOTES*",
+	"*lecture notes*",
+	"templates/*",
+];
 export class SemanticIndex {
 	private app: App;
 	private vaultIndex: VaultIndex;
@@ -151,7 +183,8 @@ export class SemanticIndex {
 		for (const note of notes) {
 			const cached = this.cache[note.path];
 			const cachedIsReusable = providerAvailable && cached && isCacheMetadataFresh(cached, note.file.stat.mtime, provider.id, modelId);
-			const summary = cachedIsReusable ? cached.summary : summarizeNote(await this.app.vault.read(note.file), this.settings.semanticSummaryLength);
+			const source = cachedIsReusable ? null : await this.readFileForSemanticIndex(note.file);
+			const summary = cachedIsReusable ? cached.summary : summarizeNote(source ?? "", this.settings.semanticSummaryLength);
 			const sourceText = cachedIsReusable ? cached.sourceText : buildSemanticSourceText(note, summary);
 
 			const record: SemanticNoteRecord = {
@@ -482,8 +515,9 @@ export class SemanticIndex {
 			merged.set(match.targetPath, current);
 		}
 
-		return [...merged.values()]
+		return this.rerankHybridMatches(normalizedQuery, currentPath, [...merged.values()])
 			.sort((left, right) => right.score - left.score)
+			.filter((match) => match.score >= getHybridNoLinkFloor(normalizedQuery, match, this.settings))
 			.slice(0, Math.max(1, limit));
 	}
 
@@ -698,6 +732,42 @@ export class SemanticIndex {
 		};
 	}
 
+	private async readFileForSemanticIndex(file: TFile): Promise<string | null> {
+		let timeoutId: ReturnType<typeof setTimeout> | null = null;
+		const readFile = this.app.vault.cachedRead
+			? this.app.vault.cachedRead(file)
+			: this.app.vault.read(file);
+		try {
+			return await Promise.race([
+				readFile,
+				new Promise<null>((resolve) => {
+					timeoutId = setTimeout(() => resolve(null), SEMANTIC_READ_TIMEOUT_MS);
+				}),
+			]);
+		} finally {
+			if (timeoutId !== null) {
+				clearTimeout(timeoutId);
+			}
+		}
+	}
+
+	private rerankHybridMatches(query: string, currentPath: string, matches: SemanticQueryMatch[]): SemanticQueryMatch[] {
+		const sourceRecord = this.records.get(currentPath) ?? null;
+		return matches.map((match) => {
+			const targetRecord = this.records.get(match.targetPath) ?? null;
+			if (!targetRecord) {
+				return match;
+			}
+			const score = match.score
+				+ contextualTargetBoost(query, sourceRecord, targetRecord)
+				- genericTargetPenalty(query, sourceRecord, targetRecord, this.settings);
+			return {
+				...match,
+				score: Math.max(0, Number(score.toFixed(4))),
+			};
+		});
+	}
+
 	private async rebuildApproximateIndex(providerId: string): Promise<void> {
 		const records = [...this.records.values()]
 			.filter((record) => record.providerId === providerId && record.embedding)
@@ -854,6 +924,113 @@ function scoreSemanticMatch(query: string, record: SemanticNoteRecord, queryVect
 	const fuzzyBoost = fuzzyPhraseBoost(query, record);
 	const canonicalBoost = canonicalTargetBoost(record);
 	return baseScore + titleOverlapBoost + aliasOverlapBoost + summaryOverlapBoost + tagOverlapBoost + exactSingleTermBoost + acronymBoost + fuzzyBoost + canonicalBoost - targetPenalty(record);
+}
+
+function contextualTargetBoost(
+	query: string,
+	sourceRecord: SemanticNoteRecord | null,
+	targetRecord: SemanticNoteRecord,
+): number {
+	let boost = 0;
+	const normalizedQuery = normalizeText(query);
+	const normalizedTitle = normalizeText(targetRecord.title);
+	const normalizedAliases = targetRecord.aliases.map(normalizeText);
+
+	if (normalizedTitle === normalizedQuery || normalizedAliases.includes(normalizedQuery)) {
+		boost += 0.08;
+	}
+	if (sourceRecord && sharesVaultRegion(sourceRecord.path, targetRecord.path)) {
+		boost += 0.035;
+	}
+	if (sourceRecord && hasTagOverlap(sourceRecord.tags, targetRecord.tags)) {
+		boost += 0.035;
+	}
+	if (targetRecord.aliases.length > 0) {
+		boost += 0.015;
+	}
+	return boost;
+}
+
+function genericTargetPenalty(
+	query: string,
+	sourceRecord: SemanticNoteRecord | null,
+	targetRecord: SemanticNoteRecord,
+	settings: SemanticAutoLinkerSettings,
+): number {
+	const normalizedQuery = normalizeText(query);
+	const normalizedTitle = normalizeText(targetRecord.title);
+	const titleTerms = tokenize(targetRecord.title);
+	const queryTerms = tokenize(query);
+	const genericTerms = new Set((settings.genericTargetTerms ?? FALLBACK_GENERIC_TARGET_TERMS).map(normalizeText));
+	let penalty = 0;
+
+	if (titleTerms.length === 1 && genericTerms.has(normalizedTitle)) {
+		penalty += 0.2;
+	}
+	if (queryTerms.length === 1 && genericTerms.has(normalizedQuery)) {
+		penalty += 0.16;
+	}
+	if (shouldSkipStructuralSemanticTarget(targetRecord, settings)) {
+		penalty += 0.24;
+	}
+	if (sourceRecord && sharesVaultRegion(sourceRecord.path, targetRecord.path)) {
+		penalty *= 0.45;
+	}
+	return penalty;
+}
+
+function getHybridNoLinkFloor(query: string, match: SemanticQueryMatch, settings: SemanticAutoLinkerSettings): number {
+	const queryTerms = tokenize(query);
+	const titleTerms = tokenize(match.targetTitle);
+	const genericTerms = new Set((settings.genericTargetTerms ?? FALLBACK_GENERIC_TARGET_TERMS).map(normalizeText));
+	if (queryTerms.length === 1 && genericTerms.has(queryTerms[0] ?? "")) {
+		return 0.5;
+	}
+	if (titleTerms.length === 1 && genericTerms.has(titleTerms[0] ?? "")) {
+		return 0.48;
+	}
+	if (settings.skipStructuralTargets !== false && matchesAnyStructuralPattern(match.targetTitle, match.targetPath, settings.structuralTargetPatterns ?? FALLBACK_STRUCTURAL_TARGET_PATTERNS)) {
+		return 0.48;
+	}
+	return 0.28;
+}
+
+function shouldSkipStructuralSemanticTarget(record: SemanticNoteRecord, settings: SemanticAutoLinkerSettings): boolean {
+	if (settings.skipStructuralTargets === false || record.aliases.length > 0) {
+		return false;
+	}
+	return matchesAnyStructuralPattern(record.title, record.path, settings.structuralTargetPatterns ?? FALLBACK_STRUCTURAL_TARGET_PATTERNS);
+}
+
+function matchesAnyStructuralPattern(title: string, path: string, patterns: string[]): boolean {
+	return patterns.some((pattern) => {
+		const regex = wildcardPatternToRegex(pattern);
+		return regex.test(title) || regex.test(path);
+	});
+}
+
+function wildcardPatternToRegex(pattern: string): RegExp {
+	const escaped = pattern.trim()
+		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+		.replace(/\*/g, ".*")
+		.replace(/\?/g, ".");
+	return new RegExp(`^${escaped}$`, "i");
+}
+
+function sharesVaultRegion(leftPath: string, rightPath: string): boolean {
+	const leftFolder = firstFolder(leftPath);
+	const rightFolder = firstFolder(rightPath);
+	return Boolean(leftFolder && leftFolder === rightFolder);
+}
+
+function firstFolder(path: string): string {
+	const [folder] = path.split("/");
+	return path.includes("/") ? folder ?? "" : "";
+}
+
+function hasTagOverlap(leftTags: string[], rightTags: string[]): boolean {
+	const left = new Set(leftTags.map(normalizeText).filter(Boolean));
+	return rightTags.some((tag) => left.has(normalizeText(tag)));
 }
 
 function exactSingleTermSemanticBoost(

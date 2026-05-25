@@ -46,6 +46,37 @@
 	display: none !important;
 }
 
+.semantic-auto-linker-mode-prompt {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14px;
+	text-align: center;
+}
+
+.semantic-auto-linker-mode-prompt-copy {
+	max-width: 420px;
+	color: var(--text-muted);
+}
+
+.semantic-auto-linker-mode-prompt-warning {
+	width: min(420px, 100%);
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	text-align: left;
+}
+
+.semantic-auto-linker-mode-prompt-toggles,
+.semantic-auto-linker-mode-prompt-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 8px;
+}
+
 .semantic-auto-linker-threshold-label,
 .semantic-auto-linker-threshold-value {
 	font-size: 12px;

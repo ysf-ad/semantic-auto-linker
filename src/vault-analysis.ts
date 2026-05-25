@@ -9,11 +9,13 @@ import type {
 	VaultGraphPreview,
 } from "./types";
 import type { SemanticAutoLinkerSettings } from "./types";
-import { analyzeNoteContent } from "./matcher";
+import { analyzeNoteContent, buildAnalysisMatchingContext } from "./matcher";
 import type { SemanticIndex } from "./semantic-index";
 import { VaultIndex } from "./vault-index";
 
 const WIKILINK_REGEX = /\[\[([^[\]|#]+)(?:#[^[\]|]+)?(?:\|[^[\]]+)?]]/g;
+const MAX_WHOLE_VAULT_SOURCE_BYTES = 512 * 1024;
+const VAULT_READ_TIMEOUT_MS = 1_500;
 
 export async function analyzeEntireVault(
 	index: VaultIndex,
@@ -23,30 +25,32 @@ export async function analyzeEntireVault(
 	onProgress?: (progress: VaultAnalysisRunProgress) => void | Promise<void>,
 ): Promise<VaultAnalysisResult> {
 	const records = index.getAll();
+	const sourceRecords = records.filter(isWholeVaultSourceCandidate);
 	const providerId = settings.semanticMode ? semanticIndex.getStatus().providerId : "none";
 	await emitProgress(onProgress, {
 		stage: "reading",
 		current: 0,
-		total: records.length,
-		message: `Reading ${records.length} note${records.length === 1 ? "" : "s"}...`,
+		total: sourceRecords.length,
+		message: `Reading ${sourceRecords.length} note${sourceRecords.length === 1 ? "" : "s"}...`,
 	});
 	let readCount = 0;
 	let lastReadProgressAt = 0;
-	const sources = await mapWithConcurrency(records, getReadConcurrency(records.length), async (record) => ({
-		record,
-		source: await readFile(record),
-	}), async () => {
+	const sourceResults = await mapWithConcurrency(sourceRecords, getReadConcurrency(sourceRecords.length), async (record) => {
+		const source = await readFileWithTimeout(readFile, record);
+		return source === null ? null : { record, source };
+	}, async () => {
 		readCount += 1;
-		if (shouldEmitProgress(readCount, records.length, lastReadProgressAt, 150)) {
+		if (shouldEmitProgress(readCount, sourceRecords.length, lastReadProgressAt, 150)) {
 			lastReadProgressAt = Date.now();
 			await emitProgress(onProgress, {
 				stage: "reading",
 				current: readCount,
-				total: records.length,
-				message: `Read ${readCount}/${records.length} note${records.length === 1 ? "" : "s"}.`,
+				total: sourceRecords.length,
+				message: `Read ${readCount}/${sourceRecords.length} note${sourceRecords.length === 1 ? "" : "s"}.`,
 			});
 		}
 	});
+	const sources = sourceResults.filter((entry): entry is { record: NoteRecord; source: string } => entry !== null);
 	const sourcesByPath: Record<string, string> = {};
 	for (const entry of sources) {
 		sourcesByPath[entry.record.path] = entry.source;
@@ -73,13 +77,14 @@ export async function analyzeEntireVault(
 		stage: "analyzing",
 		current: 0,
 		total: sources.length,
-		message: `Analyzing ${sources.length} note${sources.length === 1 ? "" : "s"}...`,
+		message: `Analyzing ${sources.length} note${sources.length === 1 ? "" : "s"}${sourceRecords.length < records.length ? ` (${records.length - sourceRecords.length} oversized skipped)` : ""}...`,
 	});
 	let analyzedCount = 0;
 	let lastPreviewAt = 0;
 	const analysisConcurrency = getAnalysisConcurrency(settings, providerId, records.length);
+	const matchingContext = buildAnalysisMatchingContext(index, settings);
 	await mapWithConcurrency(sources, analysisConcurrency, async ({ record, source }) =>
-		await analyzeNoteContent(record, source, index, settings, semanticIndex),
+		await analyzeNoteContent(record, source, index, settings, semanticIndex, undefined, matchingContext),
 		async (analysis) => {
 			analyzedCount += 1;
 			if (analysis.suggestions.length > 0) {
@@ -110,6 +115,30 @@ export async function analyzeEntireVault(
 		preview: cloneVaultAnalysisForPreview(analysisResult),
 	});
 	return analysisResult;
+}
+
+function isWholeVaultSourceCandidate(record: NoteRecord): boolean {
+	const size = record.file.stat.size;
+	return typeof size !== "number" || size <= MAX_WHOLE_VAULT_SOURCE_BYTES;
+}
+
+async function readFileWithTimeout(
+	readFile: (record: NoteRecord) => Promise<string>,
+	record: NoteRecord,
+): Promise<string | null> {
+	let timeoutId: ReturnType<typeof setTimeout> | null = null;
+	try {
+		return await Promise.race([
+			readFile(record),
+			new Promise<null>((resolve) => {
+				timeoutId = setTimeout(() => resolve(null), VAULT_READ_TIMEOUT_MS);
+			}),
+		]);
+	} finally {
+		if (timeoutId !== null) {
+			clearTimeout(timeoutId);
+		}
+	}
 }
 
 function yieldToUi(): Promise<void> {

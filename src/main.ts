@@ -19,7 +19,7 @@ import type {
 } from "./types";
 import { analyzeNoteContent, applySuggestionsToSource } from "./matcher";
 import { buildSeeAlsoSuggestions, upsertSeeAlsoSection } from "./footer";
-import { LinkReviewModal, RelatedNotesModal, ReviewInsertionMode, VaultReviewModal } from "./review-modal";
+import { LinkReviewModal, RelatedNotesModal, ReviewInsertionMode, VaultLinkModeModal, VaultReviewModal, type VaultLinkModeChoice } from "./review-modal";
 import { VaultIndex } from "./vault-index";
 import { analyzeEntireVault, recomputeVaultAnalysis } from "./vault-analysis";
 import { SEMANTIC_AUTO_LINKER_VIEW_TYPE, SemanticAutoLinkerView } from "./view";
@@ -52,6 +52,7 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	private cursorPollTimeoutHandle: number | null = null;
 	private activeVaultReviewModal: VaultReviewModal | null = null;
 	private vaultAnalysisRunPromise: Promise<void> | null = null;
+	private semanticRebuildPromise: Promise<void> | null = null;
 	private vaultAnalysisRefreshHandle: number | null = null;
 	private liveSemanticRefreshHandle: number | null = null;
 	private liveSemanticRefreshKey: string | null = null;
@@ -336,6 +337,10 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	}
 
 	async rebuildSemanticIndexFromView(): Promise<void> {
+		if (!this.settings.semanticMode) {
+			this.settings.semanticMode = true;
+			await this.saveSettings();
+		}
 		await this.rebuildSemanticIndex();
 	}
 
@@ -623,6 +628,10 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 
 	private async openVaultReview(options: { forceRefresh?: boolean } = {}): Promise<void> {
 		await this.ensureIndex();
+		const linkMode = options.forceRefresh ? await this.promptVaultLinkMode() : null;
+		if (options.forceRefresh && !linkMode) {
+			return;
+		}
 		if (this.activeVaultReviewModal) {
 			this.activeVaultReviewModal.close();
 		}
@@ -677,7 +686,43 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		} else {
 			modal.updateProgress(this.getVaultAnalysisJobState());
 		}
-		void this.ensureVaultAnalysisAvailable(options.forceRefresh ?? false);
+		void this.ensureVaultAnalysisAvailable(options.forceRefresh ?? false, linkMode ?? undefined);
+	}
+
+	private async promptVaultLinkMode(): Promise<VaultLinkModeChoice | null> {
+		const defaultChoice: VaultLinkModeChoice = {
+			enableExactMatching: this.settings.enableExactMatching,
+			enableSemanticSuggestions: this.settings.enableSemanticSuggestions,
+		};
+		if (!defaultChoice.enableExactMatching && !defaultChoice.enableSemanticSuggestions) {
+			defaultChoice.enableExactMatching = true;
+			defaultChoice.enableSemanticSuggestions = true;
+		}
+		const warning = this.getVaultLinkModeWarning(defaultChoice);
+		return await new Promise((resolve) => {
+			new VaultLinkModeModal(this.app, defaultChoice, warning, resolve, async () => {
+				await this.rebuildSemanticIndexFromView();
+			}).open();
+		});
+	}
+
+	private getVaultLinkModeWarning(choice: VaultLinkModeChoice): string | null {
+		if (!choice.enableSemanticSuggestions) {
+			return null;
+		}
+		const status = this.getSemanticStatus();
+		if (!this.settings.semanticMode) {
+			return "AI matches need semantic mode. Start with exact matches only, or enable semantic mode and build embeddings first.";
+		}
+		if (status.cachedCount === 0) {
+			return choice.enableExactMatching
+				? "AI matches need embeddings. You can still start, but the review will only include exact matches until embeddings are built."
+				: "AI matches need embeddings. Build embeddings first, or turn on exact matches for this run.";
+		}
+		if (status.pendingCount > 0) {
+			return `${status.pendingCount} note${status.pendingCount === 1 ? "" : "s"} still need embeddings. AI matches may be incomplete.`;
+		}
+		return null;
 	}
 
 	private recomputeVaultAnalysisPreview(analysis: VaultAnalysisResult): void {
@@ -898,26 +943,26 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		return Promise.resolve();
 	}
 
-	private async ensureVaultAnalysisAvailable(forceRefresh = false): Promise<void> {
+	private async ensureVaultAnalysisAvailable(forceRefresh = false, linkMode?: VaultLinkModeChoice): Promise<void> {
 		if (this.vaultAnalysisRunPromise) {
 			return this.vaultAnalysisRunPromise;
 		}
 		if (forceRefresh || !this.lastVaultAnalysis) {
-			return this.startVaultAnalysisRun("full");
+			return this.startVaultAnalysisRun("full", linkMode);
 		}
 		if (this.pendingVaultAnalysisPaths.size > 0 || this.analysisRevision !== this.vaultRevision) {
 			this.scheduleVaultAnalysisRefresh(0);
 		}
 	}
 
-	private startVaultAnalysisRun(mode: "full" | "incremental"): Promise<void> {
+	private startVaultAnalysisRun(mode: "full" | "incremental", linkMode?: VaultLinkModeChoice): Promise<void> {
 		if (this.vaultAnalysisRunPromise) {
 			return this.vaultAnalysisRunPromise;
 		}
 		this.vaultAnalysisRunPromise = (async () => {
 			try {
 				if (mode === "full") {
-					await this.runFullVaultAnalysis();
+					await this.runFullVaultAnalysis(linkMode);
 				} else {
 					await this.runPendingVaultAnalysisRefresh();
 				}
@@ -931,7 +976,14 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		return this.vaultAnalysisRunPromise;
 	}
 
-	private async runFullVaultAnalysis(): Promise<void> {
+	private async runFullVaultAnalysis(linkMode?: VaultLinkModeChoice): Promise<void> {
+		const analysisSettings = linkMode
+			? {
+				...this.settings,
+				enableExactMatching: linkMode.enableExactMatching,
+				enableSemanticSuggestions: linkMode.enableSemanticSuggestions,
+			}
+			: this.settings;
 		this.updateVaultAnalysisJobState({
 			status: "running",
 			mode: "full",
@@ -945,9 +997,9 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 		try {
 			const analysis = await analyzeEntireVault(
 				this.index,
-				this.settings,
+				analysisSettings,
 				this.semanticIndex,
-				async (record) => this.app.vault.read(record.file),
+				async (record) => this.app.vault.cachedRead(record.file),
 				(progress) => {
 					this.handleVaultAnalysisProgress(progress);
 				},
@@ -1128,6 +1180,18 @@ export default class SemanticAutoLinkerPlugin extends Plugin {
 	}
 
 	private async runSemanticRebuild(options: { silent: boolean; showProgress: boolean }): Promise<void> {
+		if (this.semanticRebuildPromise) {
+			return this.semanticRebuildPromise;
+		}
+		this.semanticRebuildPromise = this.runSemanticRebuildOnce(options);
+		try {
+			await this.semanticRebuildPromise;
+		} finally {
+			this.semanticRebuildPromise = null;
+		}
+	}
+
+	private async runSemanticRebuildOnce(options: { silent: boolean; showProgress: boolean }): Promise<void> {
 		await this.ensureIndex();
 		const progressModal = this.settings.semanticMode && options.showProgress ? new SemanticBuildProgressModal(this.app) : null;
 		progressModal?.open();

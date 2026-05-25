@@ -4,10 +4,72 @@ import { getProtectedRanges, overlapsRange } from "./protected-ranges";
 import { VaultIndex } from "./vault-index";
 import type { SemanticIndex } from "./semantic-index";
 
+const MAX_EXACT_PHRASE_TOKENS = 8;
+const MAX_ACRONYM_PHRASE_TOKENS = 6;
+const MAX_ANALYSIS_SOURCE_CHARS = 24_000;
+const FALLBACK_GENERIC_TARGET_TERMS = [
+	"file",
+	"note",
+	"page",
+	"document",
+	"item",
+	"thing",
+	"question",
+	"answer",
+	"look",
+	"text",
+	"textbook",
+	"texbook",
+	"lecture",
+	"template",
+	"source",
+	"reference",
+	"index",
+	"map",
+	"list",
+];
 interface PhraseCandidate {
 	note: NoteRecord;
 	reason: string;
 	phrase: string;
+}
+
+export interface AnalysisMatchingContext {
+	candidates: Map<number, Map<string, PhraseCandidate[]>>;
+	acronymCandidates: Map<string, PhraseCandidate[]>;
+	candidateLengthsByFirstToken: Map<string, number[]>;
+	acronymFallbackLengths: number[];
+	acronymStartLetters: Set<string>;
+	maxTokenLength: number;
+	semanticSingleWordHints: Set<string>;
+}
+
+export function buildAnalysisMatchingContext(
+	index: VaultIndex,
+	settings: SemanticAutoLinkerSettings,
+	excludedTargetPaths = new Set(settings.excludedTargetFiles ?? []),
+): AnalysisMatchingContext {
+	const candidates = settings.enableExactMatching !== false
+		? buildCandidateMap(index, "", settings, excludedTargetPaths)
+		: new Map<number, Map<string, PhraseCandidate[]>>();
+	const acronymCandidates = settings.enableExactMatching !== false
+		? buildAcronymCandidateMap(index, "", settings, excludedTargetPaths)
+		: new Map<string, PhraseCandidate[]>();
+	const maxTokenLength = Math.min(Math.max(...candidates.keys(), 1), MAX_EXACT_PHRASE_TOKENS);
+
+	return {
+		candidates,
+		acronymCandidates,
+		candidateLengthsByFirstToken: settings.enableExactMatching !== false
+			? buildCandidateLengthsByFirstToken(candidates, maxTokenLength)
+			: new Map<string, number[]>(),
+		acronymFallbackLengths: acronymCandidates.size > 0
+			? buildDescendingRange(Math.min(maxTokenLength, MAX_ACRONYM_PHRASE_TOKENS), 2)
+			: [],
+		acronymStartLetters: buildAcronymStartLetters(acronymCandidates),
+		maxTokenLength,
+		semanticSingleWordHints: buildSemanticSingleWordHints(index, "", excludedTargetPaths),
+	};
 }
 
 export async function analyzeNoteContent(
@@ -17,28 +79,40 @@ export async function analyzeNoteContent(
 	settings: SemanticAutoLinkerSettings,
 	semanticIndex?: SemanticIndex,
 	selection?: Range,
+	matchingContext?: AnalysisMatchingContext,
 ): Promise<AnalysisResult> {
-	const protectedRanges = getProtectedRanges(source, settings.skipHeadings);
+	const analysisSource = selection ? source : truncateAnalysisSource(source);
+	const protectedRanges = getProtectedRanges(analysisSource, settings.skipHeadings);
 	const existingTargets = new Set(extractExistingTargets(source));
 	const usedTargets = new Set(existingTargets);
 	const excludedTargetPaths = new Set(settings.excludedTargetFiles ?? []);
 	const exactMatchingEnabled = settings.enableExactMatching !== false;
 	const semanticSuggestionsEnabled = settings.enableSemanticSuggestions !== false;
-	const candidates = exactMatchingEnabled ? buildCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths) : new Map<number, Map<string, PhraseCandidate[]>>();
-	const acronymCandidates = exactMatchingEnabled ? buildAcronymCandidateMap(index, file.path, settings.enableAliasMatching, excludedTargetPaths) : new Map<string, PhraseCandidate[]>();
-	const tokens = indexTokens(source);
+	const candidates = exactMatchingEnabled ? matchingContext?.candidates ?? buildCandidateMap(index, file.path, settings, excludedTargetPaths) : new Map<number, Map<string, PhraseCandidate[]>>();
+	const acronymCandidates = exactMatchingEnabled ? matchingContext?.acronymCandidates ?? buildAcronymCandidateMap(index, file.path, settings, excludedTargetPaths) : new Map<string, PhraseCandidate[]>();
+	const tokens = indexTokens(analysisSource);
 	const suggestions: LinkSuggestion[] = [];
 	const occupied = new Array<boolean>(tokens.length).fill(false);
 	const displaySuggestionLimit = settings.maxLinksPerNote > 0
 		? Math.max(settings.maxLinksPerNote * 3, settings.maxLinksPerNote + 8)
 		: Number.POSITIVE_INFINITY;
-	const semanticSingleWordHints = buildSemanticSingleWordHints(index, file.path, excludedTargetPaths);
+	const semanticSingleWordHints = matchingContext?.semanticSingleWordHints ?? buildSemanticSingleWordHints(index, file.path, excludedTargetPaths);
 
-	const maxTokenLength = Math.max(...candidates.keys(), 1);
+	const maxTokenLength = matchingContext?.maxTokenLength ?? Math.min(Math.max(...candidates.keys(), 1), MAX_EXACT_PHRASE_TOKENS);
+	const candidateLengthsByFirstToken = exactMatchingEnabled
+		? matchingContext?.candidateLengthsByFirstToken ?? buildCandidateLengthsByFirstToken(candidates, maxTokenLength)
+		: new Map<string, number[]>();
+	const acronymFallbackLengths = matchingContext?.acronymFallbackLengths
+		?? (acronymCandidates.size > 0 ? buildDescendingRange(Math.min(maxTokenLength, MAX_ACRONYM_PHRASE_TOKENS), 2) : []);
+	const acronymStartLetters = matchingContext?.acronymStartLetters ?? buildAcronymStartLetters(acronymCandidates);
 	const selectionStart = selection?.start ?? 0;
-	const selectionEnd = selection?.end ?? source.length;
+	const selectionEnd = selection?.end ?? analysisSource.length;
 
+	exactScan:
 	for (let startIndex = 0; exactMatchingEnabled && startIndex < tokens.length; startIndex += 1) {
+		if (suggestions.length >= displaySuggestionLimit) {
+			break;
+		}
 		if (occupied[startIndex]) {
 			continue;
 		}
@@ -51,7 +125,13 @@ export async function analyzeNoteContent(
 			continue;
 		}
 
-		for (let tokenLength = maxTokenLength; tokenLength >= 1; tokenLength -= 1) {
+		const candidateLengths = candidateLengthsByFirstToken.get(startToken.normalized)
+			?? (acronymStartLetters.has(startToken.normalized[0] ?? "") ? acronymFallbackLengths : []);
+		if (candidateLengths.length === 0) {
+			continue;
+		}
+
+		for (const tokenLength of candidateLengths) {
 			const endIndex = startIndex + tokenLength - 1;
 			const endToken = tokens[endIndex];
 			if (!endToken) {
@@ -67,7 +147,7 @@ export async function analyzeNoteContent(
 				continue;
 			}
 
-			const rawPhrase = source.slice(startToken.start, endToken.end);
+			const rawPhrase = analysisSource.slice(startToken.start, endToken.end);
 			const key = normalizeText(rawPhrase);
 			const compactKey = compactNormalizeText(rawPhrase);
 			const matches = candidates.get(tokenLength)?.get(key) ?? candidates.get(tokenLength)?.get(compactKey) ?? [];
@@ -75,12 +155,17 @@ export async function analyzeNoteContent(
 				? getAcronymCandidatesForSpan(acronymCandidates, tokens, startIndex, endIndex)
 				: [];
 			const combinedMatches = matches.length > 0 ? matches : acronymMatches;
-			const match = combinedMatches.find((candidate) => !usedTargets.has(candidate.note.path) && !usedTargets.has(candidate.note.linkTarget));
+			const match = combinedMatches.find((candidate) =>
+				candidate.note.path !== file.path
+				&& !usedTargets.has(candidate.note.path)
+				&& !usedTargets.has(candidate.note.linkTarget)
+				&& !isLowSignalExactCandidate(candidate, rawPhrase, file, settings),
+			);
 			if (!match) {
 				continue;
 			}
 
-			const matchedText = source.slice(startToken.start, endToken.end);
+			const matchedText = analysisSource.slice(startToken.start, endToken.end);
 			const replacement = buildReplacement(match.note.linkTarget, match.note.title, matchedText);
 			suggestions.push({
 				id: `${match.note.path}:${startToken.start}:${endToken.end}`,
@@ -101,6 +186,9 @@ export async function analyzeNoteContent(
 			markOccupied(occupied, startIndex, endIndex);
 			usedTargets.add(match.note.path);
 			usedTargets.add(match.note.linkTarget);
+			if (suggestions.length >= displaySuggestionLimit) {
+				break exactScan;
+			}
 			break;
 		}
 
@@ -108,9 +196,9 @@ export async function analyzeNoteContent(
 
 	if (semanticIndex && settings.semanticMode && semanticSuggestionsEnabled && suggestions.length < displaySuggestionLimit) {
 		try {
-			const semanticSpans = buildSemanticSpanCandidates(tokens, source, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints);
+			const semanticSpans = buildSemanticSpanCandidates(tokens, analysisSource, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints);
 			if (semanticSpans.length > 0) {
-				const documentQuery = buildDocumentSemanticQuery(semanticSpans, source, settings);
+				const documentQuery = buildDocumentSemanticQuery(semanticSpans, analysisSource, settings);
 				const documentMatches = documentQuery
 					? await semanticIndex.findHybridSimilarNotes(documentQuery, file.path, Math.max(settings.semanticTopK, 6))
 					: [];
@@ -249,6 +337,138 @@ export function applySuggestionsToSource(source: string, suggestions: LinkSugges
 		}, source);
 }
 
+function truncateAnalysisSource(source: string): string {
+	if (source.length <= MAX_ANALYSIS_SOURCE_CHARS) {
+		return source;
+	}
+	const truncated = source.slice(0, MAX_ANALYSIS_SOURCE_CHARS);
+	const paragraphBreak = truncated.lastIndexOf("\n\n");
+	if (paragraphBreak > MAX_ANALYSIS_SOURCE_CHARS * 0.72) {
+		return truncated.slice(0, paragraphBreak);
+	}
+	const lineBreak = truncated.lastIndexOf("\n");
+	return lineBreak > MAX_ANALYSIS_SOURCE_CHARS * 0.72 ? truncated.slice(0, lineBreak) : truncated;
+}
+
+function buildCandidateLengthsByFirstToken(
+	candidates: Map<number, Map<string, PhraseCandidate[]>>,
+	maxTokenLength: number,
+): Map<string, number[]> {
+	const lengthsByFirstToken = new Map<string, Set<number>>();
+	for (const [tokenLength, candidateByPhrase] of candidates) {
+		if (tokenLength > maxTokenLength) {
+			continue;
+		}
+		for (const candidateList of candidateByPhrase.values()) {
+			for (const candidate of candidateList) {
+				const firstToken = tokenize(candidate.phrase)[0];
+				if (!firstToken) {
+					continue;
+				}
+				const lengths = lengthsByFirstToken.get(firstToken) ?? new Set<number>();
+				lengths.add(tokenLength);
+				lengthsByFirstToken.set(firstToken, lengths);
+			}
+		}
+	}
+	return new Map(
+		[...lengthsByFirstToken.entries()].map(([token, lengths]) => [
+			token,
+			[...lengths].sort((left, right) => right - left),
+		]),
+	);
+}
+
+function buildDescendingRange(max: number, min: number): number[] {
+	const values: number[] = [];
+	for (let value = max; value >= min; value -= 1) {
+		values.push(value);
+	}
+	return values;
+}
+
+function buildAcronymStartLetters(acronymCandidates: Map<string, PhraseCandidate[]>): Set<string> {
+	const letters = new Set<string>();
+	for (const acronym of acronymCandidates.keys()) {
+		const firstLetter = acronym[0];
+		if (firstLetter) {
+			letters.add(firstLetter);
+		}
+	}
+	return letters;
+}
+
+function isLowSignalExactCandidate(
+	candidate: PhraseCandidate,
+	rawPhrase: string,
+	sourceRecord: NoteRecord,
+	settings: SemanticAutoLinkerSettings,
+): boolean {
+	const normalizedPhrase = normalizeText(rawPhrase);
+	const lowSignalTargets = new Set((settings.genericTargetTerms ?? FALLBACK_GENERIC_TARGET_TERMS).map(normalizeText));
+	if (!lowSignalTargets.has(normalizedPhrase)) {
+		return false;
+	}
+	if (candidate.reason === "acronym") {
+		return false;
+	}
+	if (candidate.note.titleTokens.length > 1 || candidate.note.aliases.length > 1) {
+		return false;
+	}
+	if (sharesFirstFolder(sourceRecord.path, candidate.note.path) && sourceRecord.path !== candidate.note.path) {
+		return false;
+	}
+	return true;
+}
+
+function isStructuralAutoLinkTarget(note: NoteRecord): boolean {
+	const normalizedTitle = normalizeText(note.title);
+	const normalizedPath = normalizeText(note.path);
+	return /^_?index(?:\b|_)/i.test(note.title)
+		|| /^index(?:\b|_)/.test(normalizedTitle)
+		|| (/\bindex\b/.test(normalizedPath) && /^_?index/i.test(note.title))
+		|| /^notes? @\d{2}-\d{2}-\d{2}$/i.test(note.title)
+		|| /^\d{4}-\d{2}-\d{2}(?:\b|$)/.test(note.title)
+		|| /^lecture \d{4}-\d{2}-\d{2}(?:\b|$)/i.test(note.title)
+		|| /^untitled(?: \d+)?$/i.test(note.title)
+		|| /^compiled notes?\b/i.test(note.title)
+		|| /\blecture notes?\b/i.test(note.title)
+		|| /^templates?\//i.test(note.path);
+}
+
+function shouldSkipStructuralTarget(note: NoteRecord, settings: SemanticAutoLinkerSettings): boolean {
+	if (settings.skipStructuralTargets === false || note.aliases.length > 0) {
+		return false;
+	}
+	const patterns = settings.structuralTargetPatterns ?? [];
+	if (patterns.length === 0) {
+		return isStructuralAutoLinkTarget(note);
+	}
+	return patterns.some((pattern) => matchesStructuralPattern(note, pattern));
+}
+
+function matchesStructuralPattern(note: NoteRecord, pattern: string): boolean {
+	const trimmed = pattern.trim();
+	if (!trimmed) {
+		return false;
+	}
+	const regex = wildcardPatternToRegex(trimmed);
+	return regex.test(note.title) || regex.test(note.path);
+}
+
+function wildcardPatternToRegex(pattern: string): RegExp {
+	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+		.replace(/\*/g, ".*")
+		.replace(/\?/g, ".");
+	return new RegExp(`^${escaped}$`, "i");
+}
+
+function sharesFirstFolder(leftPath: string, rightPath: string): boolean {
+	const leftFolder = leftPath.split("/")[0] ?? "";
+	const rightFolder = rightPath.split("/")[0] ?? "";
+	return leftFolder.length > 0 && leftFolder === rightFolder && leftPath.includes("/") && rightPath.includes("/");
+}
+
 export function collectSemanticQueryCandidatesForSource(
 	source: string,
 	settings: SemanticAutoLinkerSettings,
@@ -297,23 +517,29 @@ function getSemanticSuggestionBudget(path: string, title: string): number {
 function buildCandidateMap(
 	index: VaultIndex,
 	currentPath: string,
-	includeAliases: boolean,
+	settings: SemanticAutoLinkerSettings,
 	excludedTargetPaths: Set<string>,
 ): Map<number, Map<string, PhraseCandidate[]>> {
 	const map = new Map<number, Map<string, PhraseCandidate[]>>();
+	const includeAliases = settings.enableAliasMatching;
 
 	for (const note of index.getAll()) {
 		if (note.path === currentPath || excludedTargetPaths.has(note.path)) {
 			continue;
 		}
 
-		addCandidate(map, note, note.title, "title");
+		const structuralTarget = shouldSkipStructuralTarget(note, settings);
+		if (!structuralTarget) {
+			addCandidate(map, note, note.title, "title");
+		}
 		if (includeAliases) {
 			for (const alias of note.aliases) {
 				addCandidate(map, note, alias, "alias");
 			}
-			for (const implicitAlias of getImplicitAliases(note)) {
-				addCandidate(map, note, implicitAlias, "alias");
+			if (!structuralTarget) {
+				for (const implicitAlias of getImplicitAliases(note)) {
+					addCandidate(map, note, implicitAlias, "alias");
+				}
 			}
 		}
 	}
@@ -335,13 +561,17 @@ function buildCandidateMap(
 function buildAcronymCandidateMap(
 	index: VaultIndex,
 	currentPath: string,
-	includeAliases: boolean,
+	settings: SemanticAutoLinkerSettings,
 	excludedTargetPaths: Set<string>,
 ): Map<string, PhraseCandidate[]> {
 	const map = new Map<string, PhraseCandidate[]>();
+	const includeAliases = settings.enableAliasMatching;
 
 	for (const note of index.getAll()) {
 		if (note.path === currentPath || excludedTargetPaths.has(note.path)) {
+			continue;
+		}
+		if (shouldSkipStructuralTarget(note, settings)) {
 			continue;
 		}
 

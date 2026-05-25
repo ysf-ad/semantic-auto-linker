@@ -396,6 +396,136 @@ test("excluded target files are not suggested as deterministic matches", async (
 	assert.equal(analysis.suggestions.length, 0);
 });
 
+test("generic and structural targets are not suggested as deterministic matches", async () => {
+	const sourceRecord = {
+		file: {
+			path: "Scratch.md",
+			fullPath: "Scratch.md",
+			basename: "Scratch",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Scratch.md",
+		linkTarget: "Scratch",
+		title: "Scratch",
+		aliases: [],
+		normalizedTitle: "scratch",
+		titleTokens: ["scratch"],
+		lookupKeys: ["scratch"],
+		tags: [],
+	};
+	const filesRecord = {
+		file: {
+			path: "Files.md",
+			fullPath: "Files.md",
+			basename: "Files",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Files.md",
+		linkTarget: "Files",
+		title: "Files",
+		aliases: [],
+		normalizedTitle: "file",
+		titleTokens: ["file"],
+		lookupKeys: ["file"],
+		tags: [],
+	};
+	const indexRecord = {
+		file: {
+			path: "Course/_Index_Course.md",
+			fullPath: "Course/_Index_Course.md",
+			basename: "_Index_Course",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Course/_Index_Course.md",
+		linkTarget: "Course/_Index_Course",
+		title: "_Index_Course",
+		aliases: [],
+		normalizedTitle: "index course",
+		titleTokens: ["index", "course"],
+		lookupKeys: ["index course"],
+		tags: [],
+	};
+	const datedRecord = {
+		file: {
+			path: "Course/Notes @04-09-25.md",
+			fullPath: "Course/Notes @04-09-25.md",
+			basename: "Notes @04-09-25",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Course/Notes @04-09-25.md",
+		linkTarget: "Course/Notes @04-09-25",
+		title: "Notes @04-09-25",
+		aliases: [],
+		normalizedTitle: "note 04 09 25",
+		titleTokens: ["note", "04", "09", "25"],
+		lookupKeys: ["note 04 09 25"],
+		tags: [],
+	};
+	const untitledRecord = {
+		file: {
+			path: "Course/Untitled.md",
+			fullPath: "Course/Untitled.md",
+			basename: "Untitled",
+			extension: "md",
+			stat: { mtime: Date.now() },
+		},
+		path: "Course/Untitled.md",
+		linkTarget: "Course/Untitled",
+		title: "Untitled",
+		aliases: [],
+		normalizedTitle: "untitled",
+		titleTokens: ["untitled"],
+		lookupKeys: ["untitled"],
+		tags: [],
+	};
+	const index = {
+		getAll() {
+			return [sourceRecord, filesRecord, indexRecord, datedRecord, untitledRecord];
+		},
+	};
+	const settings = {
+		firstOccurrenceOnly: true,
+		maxLinksPerNote: 12,
+		excludedFolders: [],
+		excludedFiles: [],
+		excludedTargetFiles: [],
+		enableExactMatching: true,
+		enableAliasMatching: true,
+		enableSemanticSuggestions: false,
+		skipHeadings: true,
+		seeAlsoHeading: "See also",
+		seeAlsoCount: 5,
+		semanticMode: false,
+		semanticProviderId: "ollama",
+		semanticTopK: 8,
+		semanticSummaryLength: 280,
+		semanticTransformersModel: "Xenova/all-MiniLM-L6-v2",
+		semanticTransformersDevice: "auto",
+		semanticOllamaBaseUrl: "http://127.0.0.1:11434",
+		semanticOllamaModel: "embeddinggemma",
+		semanticProjectionMetric: "cosine",
+		semanticExplorerLabelDistance: 620,
+		semanticDisplayThreshold: 0.3,
+		semanticAcceptanceThreshold: 0.6,
+		autoRefreshEnabled: true,
+		autoRefreshMinutes: 60,
+	};
+
+	const analysis = await analyzeNoteContent(
+		sourceRecord,
+		"Files should not link every generic mention. _Index_Course is a navigation page. Notes @04-09-25 and Untitled are not concepts.",
+		index,
+		settings,
+		undefined,
+	);
+
+	assert.equal(analysis.suggestions.length, 0);
+});
+
 test("current-note analysis falls back to first-name matching for person-title notes without explicit aliases", async () => {
 	const sourceRecord = {
 		file: {

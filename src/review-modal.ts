@@ -14,6 +14,93 @@ type VaultFilterMode = "all" | "semantic" | "deterministic" | "accepted" | "unch
 type VaultGroupSortMode = "name" | "most-suggestions" | "highest-confidence" | "lowest-confidence";
 type VaultSuggestionSortMode = "document" | "highest-confidence" | "lowest-confidence";
 
+export interface VaultLinkModeChoice {
+	enableExactMatching: boolean;
+	enableSemanticSuggestions: boolean;
+}
+
+export class VaultLinkModeModal extends Modal {
+	private choice: VaultLinkModeChoice;
+	private warning: string | null;
+	private resolveChoice: (choice: VaultLinkModeChoice | null) => void;
+	private onBuildEmbeddings: (() => Promise<void>) | null;
+
+	constructor(
+		app: Modal["app"],
+		defaultChoice: VaultLinkModeChoice,
+		warning: string | null,
+		resolveChoice: (choice: VaultLinkModeChoice | null) => void,
+		onBuildEmbeddings: (() => Promise<void>) | null = null,
+	) {
+		super(app);
+		this.choice = { ...defaultChoice };
+		this.warning = warning;
+		this.resolveChoice = resolveChoice;
+		this.onBuildEmbeddings = onBuildEmbeddings;
+	}
+
+	onOpen(): void {
+		const { contentEl, titleEl } = this;
+		titleEl.setText("Choose linking mode");
+		contentEl.empty();
+		contentEl.addClass("semantic-auto-linker-mode-prompt");
+
+		contentEl.createDiv({
+			text: "Pick which suggestion sources to include in this whole-vault review.",
+			cls: "semantic-auto-linker-mode-prompt-copy",
+		});
+		if (this.warning) {
+			contentEl.createDiv({
+				text: this.warning,
+				cls: "semantic-auto-linker-mode-prompt-warning",
+			});
+			if (this.onBuildEmbeddings) {
+				const warningActions = contentEl.createDiv({ cls: "semantic-auto-linker-mode-prompt-actions" });
+				const buildButton = warningActions.createEl("button", { text: "Build embeddings" });
+				buildButton.onclick = () => {
+					void withButtonBusy(buildButton, "Building...", async () => {
+						await this.onBuildEmbeddings?.();
+					});
+				};
+			}
+		}
+
+		const toggles = contentEl.createDiv({ cls: "semantic-auto-linker-mode-prompt-toggles" });
+		const exactButton = toggles.createEl("button", { text: "Exact matches", cls: "semantic-auto-linker-source-toggle" });
+		const semanticButton = toggles.createEl("button", { text: "AI matches", cls: "semantic-auto-linker-source-toggle" });
+		const actions = contentEl.createDiv({ cls: "semantic-auto-linker-mode-prompt-actions" });
+		const cancelButton = actions.createEl("button", { text: "Cancel" });
+		const startButton = actions.createEl("button", { text: "Start review", cls: "mod-cta" });
+
+		const render = () => {
+			exactButton.toggleClass("is-active", this.choice.enableExactMatching);
+			semanticButton.toggleClass("is-active", this.choice.enableSemanticSuggestions);
+			startButton.disabled = !this.choice.enableExactMatching && !this.choice.enableSemanticSuggestions;
+		};
+		exactButton.onclick = () => {
+			this.choice.enableExactMatching = !this.choice.enableExactMatching;
+			render();
+		};
+		semanticButton.onclick = () => {
+			this.choice.enableSemanticSuggestions = !this.choice.enableSemanticSuggestions;
+			render();
+		};
+		cancelButton.onclick = () => {
+			this.resolveChoice(null);
+			this.close();
+		};
+		startButton.onclick = () => {
+			this.resolveChoice({ ...this.choice });
+			this.close();
+		};
+		render();
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 export class LinkReviewModal extends Modal {
 	private analysis: AnalysisResult;
 	private onApply: ApplyHandler;
@@ -251,6 +338,8 @@ export class VaultReviewModal extends Modal {
 		const actionRow = rightPane.createDiv({ cls: "semantic-auto-linker-actions" });
 		const acceptAll = actionRow.createEl("button", { text: "Accept all", cls: "mod-cta" });
 		const rejectAll = actionRow.createEl("button", { text: "Reject all" });
+		const acceptFiltered = actionRow.createEl("button", { text: "Select filtered" });
+		const rejectFiltered = actionRow.createEl("button", { text: "Deselect filtered" });
 		const apply = actionRow.createEl("button", { text: "Apply accepted", cls: "mod-cta" });
 		const displayTitleOption = actionRow.createEl("label", { cls: "semantic-auto-linker-footer-option" });
 		displayTitleOption.setCssProps({ display: "none" });
@@ -271,6 +360,14 @@ export class VaultReviewModal extends Modal {
 
 		rejectAll.onclick = () => {
 			this.setAcceptedState(false);
+		};
+
+		acceptFiltered.onclick = () => {
+			this.setFilteredAcceptedState(true);
+		};
+
+		rejectFiltered.onclick = () => {
+			this.setFilteredAcceptedState(false);
 		};
 
 		apply.onclick = async () => {
@@ -316,6 +413,28 @@ export class VaultReviewModal extends Modal {
 			for (const suggestion of result.suggestions) {
 				suggestion.accepted = value;
 			}
+		}
+		this.onChange();
+		this.graphPanel?.updateAnalysis(this.analysis);
+		this.renderResultList();
+	}
+
+	private setFilteredAcceptedState(value: boolean): void {
+		if (!this.analysis) {
+			return;
+		}
+		let changed = false;
+		for (const result of this.analysis.results) {
+			for (const suggestion of result.suggestions) {
+				if (!this.matchesFilter(suggestion) || suggestion.accepted === value) {
+					continue;
+				}
+				suggestion.accepted = value;
+				changed = true;
+			}
+		}
+		if (!changed) {
+			return;
 		}
 		this.onChange();
 		this.graphPanel?.updateAnalysis(this.analysis);

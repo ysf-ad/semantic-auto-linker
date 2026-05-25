@@ -3,12 +3,49 @@ import type SemanticAutoLinkerPlugin from "./main";
 import type { SemanticAutoLinkerSettings, SemanticProviderModel } from "./types";
 import { formatMultilineSetting, splitMultilineSetting } from "./text-utils";
 
+export const DEFAULT_STRUCTURAL_TARGET_PATTERNS = [
+	"_Index*",
+	"Index_*",
+	"Notes @??-??-??",
+	"????-??-??*",
+	"lecture ????-??-??*",
+	"Untitled*",
+	"COMPILED NOTES*",
+	"*lecture notes*",
+	"templates/*",
+];
+
+export const DEFAULT_GENERIC_TARGET_TERMS = [
+	"file",
+	"note",
+	"page",
+	"document",
+	"item",
+	"thing",
+	"question",
+	"answer",
+	"look",
+	"text",
+	"textbook",
+	"texbook",
+	"lecture",
+	"template",
+	"source",
+	"reference",
+	"index",
+	"map",
+	"list",
+];
+
 export const DEFAULT_SETTINGS: SemanticAutoLinkerSettings = {
 	firstOccurrenceOnly: true,
 	maxLinksPerNote: 12,
 	excludedFolders: [],
 	excludedFiles: [],
 	excludedTargetFiles: [],
+	genericTargetTerms: DEFAULT_GENERIC_TARGET_TERMS,
+	skipStructuralTargets: true,
+	structuralTargetPatterns: DEFAULT_STRUCTURAL_TARGET_PATTERNS,
 	enableExactMatching: true,
 	enableAliasMatching: true,
 	enableSemanticSuggestions: true,
@@ -144,6 +181,42 @@ export class SemanticAutoLinkerSettingTab extends PluginSettingTab {
 					.setValue(formatMultilineSetting(this.plugin.settings.excludedTargetFiles ?? []))
 					.onChange(async (value) => {
 						await this.plugin.updateExcludedTargetFiles(splitMultilineSetting(value));
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Skip structural targets")
+			.setDesc("Avoid suggesting navigation, template, dated log, and placeholder notes as link targets. Explicit aliases still opt a note back into matching.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.skipStructuralTargets).onChange(async (value) => {
+					this.plugin.settings.skipStructuralTargets = value;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Generic target terms")
+			.setDesc("One-word titles that should not become broad auto-link targets unless an explicit alias or local context supports them.")
+			.addTextArea((text) =>
+				text
+					.setPlaceholder(DEFAULT_GENERIC_TARGET_TERMS.join("\n"))
+					.setValue(formatMultilineSetting(this.plugin.settings.genericTargetTerms ?? DEFAULT_GENERIC_TARGET_TERMS))
+					.onChange(async (value) => {
+						this.plugin.settings.genericTargetTerms = splitMultilineSetting(value);
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Structural target patterns")
+			.setDesc("Comma or newline separated title/path patterns skipped as auto-link targets. Use wildcard patterns.")
+			.addTextArea((text) =>
+				text
+					.setPlaceholder(DEFAULT_STRUCTURAL_TARGET_PATTERNS.join("\n"))
+					.setValue(formatMultilineSetting(this.plugin.settings.structuralTargetPatterns ?? DEFAULT_STRUCTURAL_TARGET_PATTERNS))
+					.onChange(async (value) => {
+						this.plugin.settings.structuralTargetPatterns = splitMultilineSetting(value);
+						await this.plugin.saveSettings();
 					}),
 			);
 
