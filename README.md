@@ -7,21 +7,33 @@
 <p align="center">
   <a href="https://github.com/ysf-ad/semantic-auto-linker/stargazers"><img src="https://img.shields.io/github/stars/ysf-ad/semantic-auto-linker?style=social" alt="GitHub stars"></a>
   <a href="https://github.com/ysf-ad/semantic-auto-linker/releases"><img src="https://img.shields.io/github/v/release/ysf-ad/semantic-auto-linker" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"></a>
 </p>
 
-Semantic Auto-Linker is an Obsidian community plugin for safe, reviewable wiki-link insertion with local semantic retrieval.
+Semantic Auto-Linker helps you discover and connect the hidden structure in your Obsidian vault.
+
+It finds missing wiki-links, previews the graph impact before writing anything, and lets you explore your notes as a semantic space where similar notes and concepts appear closer together.
 
 If Semantic Auto-Linker saves you time, consider starring the repo. Stars help other Obsidian users find the plugin.
 
 It focuses on two things:
 - safe inline linking with review before write
-- vault-wide review with graph impact and semantic exploration
+- semantic structure discovery across notes and concepts
+- vault-wide review with graph impact before applying links
 
 ## Preview links before applying them
 
 ![Before and after vault graph](assets/before-after.png)
 
 Semantic Auto-Linker previews how accepted suggestions reshape your vault graph before anything is written.
+
+## Explore your semantic note space
+
+![Semantic space explorer](assets/semantic-space-explorer.gif)
+
+Obsidian's graph view shows the links you already made. Semantic Auto-Linker also shows the relationships your vault implies.
+
+The embedding explorer projects your vault into a semantic vector space, where similar notes and extracted concepts appear close together even when they are not linked yet. Use it to spot clusters, isolated ideas, and relationships your existing graph does not show.
 
 ## Watch whole-vault review build live
 
@@ -35,20 +47,13 @@ Run a vault-wide scan, choose exact matches, AI matches, or both, and review eve
 
 Keep a sidebar open for contextual link suggestions with confidence, source type, context, and one-click target exclusion.
 
-## Explore your semantic note space
-
-![Embedding explorer with semantic projection](assets/embedding-explorer.png)
-
-The embedding explorer projects your vault into a semantic space, where similar notes appear closer together. Explore notes or extracted concepts, switch between 2D and 3D views, and choose cosine or Euclidean distance for projection.
-
-Click any note to open it, inspect nearby ideas, and use the pairwise neighborhood matrix to understand how concepts and notes relate across your vault.
-
 ## Features
 
 - Analyze the current note and review suggested inline `[[links]]`
 - Analyze the whole vault and review suggestions before applying
+- Explore your vault as a semantic vector space
 - Choose exact matches, AI matches, or both before each whole-vault scan
-- Exclude noisy target notes directly from review rows or settings
+- Exclude or retarget noisy suggestions directly from review rows
 - Switch insertion mode per review:
   - `Inline` updates matched text in place
   - `Footer` writes accepted targets into a footer section
@@ -156,6 +161,10 @@ Then reload Obsidian and enable the plugin in **Settings → Community plugins**
 - Semantic suggestions are still more conservative and less reliable than deterministic title/alias matches.
 - Semantic quality depends heavily on the local embedding model.
 - The plugin is currently desktop-only.
+
+## License
+
+Semantic Auto-Linker is released under the MIT license.
 
 ## Release
 
