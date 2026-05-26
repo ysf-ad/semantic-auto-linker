@@ -55,6 +55,26 @@ const FALLBACK_STRUCTURAL_TARGET_PATTERNS = [
 	"*lecture notes*",
 	"templates/*",
 ];
+
+interface SemanticRecordSearchMetadata {
+	normalizedTitle: string;
+	normalizedAliases: string[];
+	titleTerms: Set<string>;
+	aliasTerms: Set<string>;
+	tagTerms: Set<string>;
+	summaryTerms: Set<string>;
+	summaryCounts: Map<string, number>;
+	titleAcronym: string | null;
+	aliasAcronyms: string[];
+	normalizedTitleCompact: string;
+	normalizedAliasesCompact: string[];
+	compactPhrases: string[];
+	canonicalBoost: number;
+	targetPenalty: number;
+}
+
+const recordSearchMetadataCache = new WeakMap<SemanticNoteRecord, SemanticRecordSearchMetadata>();
+
 export class SemanticIndex {
 	private app: App;
 	private vaultIndex: VaultIndex;
@@ -66,9 +86,11 @@ export class SemanticIndex {
 	private lastProviderAvailability: SemanticProviderAvailability | null = null;
 	private queryVectorCache = new Map<string, number[]>();
 	private queryResultCache = new Map<string, SemanticQueryMatch[]>();
+	private sparseResultCache = new Map<string, SemanticQueryMatch[]>();
 	private annIndex: HNSW | null = null;
 	private annPathById = new Map<number, string>();
 	private searchableRecords: Array<{ record: SemanticNoteRecord; embedding: number[] }> = [];
+	private searchableRecordByPath = new Map<string, { record: SemanticNoteRecord; embedding: number[] }>();
 	private activeProviderId: string | null = null;
 
 	constructor(
@@ -129,6 +151,7 @@ export class SemanticIndex {
 			: this.lastProviderAvailability;
 		this.queryVectorCache.clear();
 		this.queryResultCache.clear();
+		this.sparseResultCache.clear();
 		if (this.activeProviderId) {
 			await this.rebuildApproximateIndex(this.activeProviderId);
 		} else {
@@ -141,6 +164,8 @@ export class SemanticIndex {
 	invalidateFile(path: string): void {
 		this.records.delete(path);
 		this.queryResultCache.clear();
+		this.sparseResultCache.clear();
+		this.searchableRecordByPath.delete(path);
 	}
 
 	async updateFileEmbedding(note: NoteRecord, file: TFile, source: string): Promise<boolean> {
@@ -181,6 +206,8 @@ export class SemanticIndex {
 		this.records.set(note.path, nextRecord);
 		this.queryVectorCache.clear();
 		this.queryResultCache.clear();
+		this.sparseResultCache.clear();
+		this.searchableRecordByPath.delete(note.path);
 		this.cache[note.path] = {
 			path: note.path,
 			providerId: activeProvider.id,
@@ -201,6 +228,8 @@ export class SemanticIndex {
 		this.records.delete(path);
 		delete this.cache[path];
 		this.queryResultCache.clear();
+		this.sparseResultCache.clear();
+		this.searchableRecordByPath.delete(path);
 	}
 
 	clearCache(): void {
@@ -210,8 +239,11 @@ export class SemanticIndex {
 		this.lastProviderAvailability = null;
 		this.queryVectorCache.clear();
 		this.queryResultCache.clear();
+		this.sparseResultCache.clear();
 		this.annIndex = null;
 		this.annPathById.clear();
+		this.searchableRecords = [];
+		this.searchableRecordByPath.clear();
 	}
 
 	async rebuild(onProgress?: (progress: SemanticBuildProgress) => void | Promise<void>): Promise<SemanticIndexStatus> {
@@ -348,6 +380,7 @@ export class SemanticIndex {
 		this.lastProviderAvailability = effectiveAvailability;
 		this.queryVectorCache.clear();
 		this.queryResultCache.clear();
+		this.sparseResultCache.clear();
 		await this.rebuildApproximateIndex(this.activeProviderId);
 		await notifyProgress(onProgress, {
 			stage: "complete",
@@ -416,24 +449,7 @@ export class SemanticIndex {
 			return [];
 		}
 
-		const scoredRecords = [...this.records.values()]
-			.filter((record) =>
-				record.path !== currentPath
-				&& record.providerId === providerId
-				&& record.embedding
-				&& !this.isExcludedTarget(record.path)
-				&& !linkedTargets.has(record.path)
-				&& !linkedTargets.has(record.path.replace(/\.md$/i, ""))
-				&& !linkedTargets.has(record.title),
-			)
-			.map((record) => ({
-				record,
-				embedding: record.embedding as number[],
-			}));
-
-		const matches = this.annIndex
-			? this.searchApproximate(current.title, queryVector, scoredRecords, limit)
-			: searchBruteForce(current.title, queryVector, scoredRecords, limit);
+		const matches = this.searchRelatedRecords(current.title, queryVector, currentPath, linkedTargets, providerId, limit);
 
 		return matches
 			.slice(0, limit)
@@ -521,6 +537,11 @@ export class SemanticIndex {
 			return result;
 		}
 		await this.populateQueryVectors(provider, providerId, modelId, trimmedQueries);
+		const scopedRecords = allowedTargetPaths && allowedTargetPaths.size > 0 && allowedTargetPaths.size <= 128
+			? Array.from(allowedTargetPaths)
+				.map((path) => this.searchableRecordByPath.get(path))
+				.filter((entry): entry is { record: SemanticNoteRecord; embedding: number[] } => Boolean(entry))
+			: null;
 
 		for (const query of trimmedQueries) {
 			const queryVector = this.queryVectorCache.get(buildQueryVectorCacheKey(providerId, modelId, query));
@@ -528,13 +549,18 @@ export class SemanticIndex {
 				continue;
 			}
 			const expandedLimit = Math.min(this.searchableRecords.length, Math.max(limit * 4, 24));
-			const resultKey = buildQueryResultCacheKey(providerId, modelId, query, expandedLimit);
-			let cachedMatches = this.queryResultCache.get(resultKey);
-			if (!cachedMatches) {
-				cachedMatches = this.annIndex
-					? this.searchApproximate(query, queryVector, this.searchableRecords, expandedLimit)
-					: searchBruteForce(query, queryVector, this.searchableRecords, expandedLimit);
-				this.queryResultCache.set(resultKey, cachedMatches);
+			let cachedMatches: SemanticQueryMatch[];
+			if (scopedRecords) {
+				cachedMatches = searchBruteForce(query, queryVector, scopedRecords, Math.min(scopedRecords.length, expandedLimit));
+			} else {
+				const resultKey = buildQueryResultCacheKey(providerId, modelId, query, expandedLimit);
+				cachedMatches = this.queryResultCache.get(resultKey) ?? [];
+				if (cachedMatches.length === 0) {
+					cachedMatches = this.annIndex
+						? this.searchApproximate(query, queryVector, this.searchableRecords, expandedLimit)
+						: searchBruteForce(query, queryVector, this.searchableRecords, expandedLimit);
+					this.queryResultCache.set(resultKey, cachedMatches);
+				}
 			}
 			result.set(
 				query,
@@ -549,21 +575,29 @@ export class SemanticIndex {
 		return result;
 	}
 
-	async findHybridSimilarNotes(query: string, currentPath: string, limit: number): Promise<SemanticQueryMatch[]> {
+	async findHybridSimilarNotes(query: string, currentPath: string, limit: number, allowedTargetPaths?: Set<string>): Promise<SemanticQueryMatch[]> {
 		const normalizedQuery = query.trim();
 		if (!this.settings.semanticMode || !normalizedQuery) {
 			return [];
 		}
 
-		const denseMatchesByQuery = await this.findSimilarNotes([normalizedQuery], currentPath, Math.max(limit, 8));
+		const baseLimit = Math.max(limit, 8);
+		const expandedLimit = getExpandedHybridLimit(baseLimit);
+		const denseMatchesByQuery = await this.findSimilarNotes([normalizedQuery], currentPath, baseLimit, allowedTargetPaths);
 		const denseMatches = denseMatchesByQuery.get(normalizedQuery) ?? [];
-		const sparseMatches = this.searchSparse(normalizedQuery, currentPath, Math.max(limit, 8));
+		const sparseMatches = this.searchSparse(normalizedQuery, expandedLimit, allowedTargetPaths);
 
 		const merged = new Map<string, SemanticQueryMatch>();
 		for (const match of sparseMatches) {
+			if (match.targetPath === currentPath || this.isExcludedTarget(match.targetPath)) {
+				continue;
+			}
 			merged.set(match.targetPath, { ...match });
 		}
 		for (const match of denseMatches) {
+			if (match.targetPath === currentPath || this.isExcludedTarget(match.targetPath)) {
+				continue;
+			}
 			const current = merged.get(match.targetPath);
 			if (!current) {
 				merged.set(match.targetPath, { ...match });
@@ -616,6 +650,29 @@ export class SemanticIndex {
 				? this.searchApproximate(query, queryVector, this.searchableRecords, expandedLimit)
 				: searchBruteForce(query, queryVector, this.searchableRecords, expandedLimit);
 			this.queryResultCache.set(resultKey, matches);
+		}
+	}
+
+	async prewarmQueryVectors(queries: string[]): Promise<void> {
+		const trimmedQueries = [...new Set(queries.map((query) => query.trim()).filter(Boolean))];
+		if (!this.settings.semanticMode || trimmedQueries.length === 0) {
+			return;
+		}
+
+		const provider = this.getActiveProvider();
+		const availability = this.lastProviderAvailability?.available
+			? this.lastProviderAvailability
+			: await provider.checkAvailability(this.settings);
+		if (!availability.available) {
+			this.lastProviderAvailability = availability;
+			return;
+		}
+		this.lastProviderAvailability = availability;
+
+		const providerId = provider.id;
+		const modelId = provider.getModelId(this.settings);
+		for (let index = 0; index < trimmedQueries.length; index += 128) {
+			await this.populateQueryVectors(provider, providerId, modelId, trimmedQueries.slice(index, index + 128));
 		}
 	}
 
@@ -831,9 +888,11 @@ export class SemanticIndex {
 				embedding: record.embedding as number[],
 			}));
 		this.searchableRecords = records;
+		this.searchableRecordByPath = new Map(records.map((entry) => [entry.record.path, entry]));
 		if (records.length === 0) {
 			this.annIndex = null;
 			this.annPathById.clear();
+			this.searchableRecordByPath.clear();
 			return;
 		}
 
@@ -841,6 +900,7 @@ export class SemanticIndex {
 		if (!dimension) {
 			this.annIndex = null;
 			this.annPathById.clear();
+			this.searchableRecordByPath.clear();
 			return;
 		}
 
@@ -906,14 +966,82 @@ export class SemanticIndex {
 		return matches;
 	}
 
-	private searchSparse(query: string, currentPath: string, limit: number): SemanticQueryMatch[] {
+	private searchRelatedRecords(
+		query: string,
+		queryVector: number[],
+		currentPath: string,
+		linkedTargets: Set<string>,
+		providerId: string,
+		limit: number,
+	): SemanticQueryMatch[] {
+		if (this.annIndex) {
+			const matches: SemanticQueryMatch[] = [];
+			const overfetch = Math.min(this.searchableRecords.length, Math.max(limit * 6, 48));
+			let approximate: Array<{ id: number }> = [];
+			try {
+				approximate = this.annIndex.searchKNN(queryVector, overfetch);
+			} catch {
+				this.annIndex = null;
+				this.annPathById.clear();
+			}
+			for (const item of approximate) {
+				const path = this.annPathById.get(item.id);
+				const entry = path ? this.searchableRecordByPath.get(path) : null;
+				if (!entry || !this.isRelatedTargetAllowed(entry.record, currentPath, linkedTargets, providerId)) {
+					continue;
+				}
+				matches.push({
+					query,
+					targetPath: entry.record.path,
+					targetTitle: entry.record.title,
+					targetLink: entry.record.path.replace(/\.md$/i, ""),
+					score: scoreSemanticMatch(query, entry.record, queryVector, entry.embedding),
+				});
+				if (matches.length >= limit) {
+					break;
+				}
+			}
+			if (matches.length >= limit || this.annIndex) {
+				return matches.sort((left, right) => right.score - left.score).slice(0, Math.max(1, limit));
+			}
+		}
+
+		const scoredRecords = this.searchableRecords.filter(({ record }) =>
+			this.isRelatedTargetAllowed(record, currentPath, linkedTargets, providerId),
+		);
+		return searchBruteForce(query, queryVector, scoredRecords, limit);
+	}
+
+	private isRelatedTargetAllowed(record: SemanticNoteRecord, currentPath: string, linkedTargets: Set<string>, providerId: string): boolean {
+		return record.path !== currentPath
+			&& record.providerId === providerId
+			&& Boolean(record.embedding)
+			&& !this.isExcludedTarget(record.path)
+			&& !linkedTargets.has(record.path)
+			&& !linkedTargets.has(record.path.replace(/\.md$/i, ""))
+			&& !linkedTargets.has(record.title);
+	}
+
+	private searchSparse(query: string, limit: number, allowedTargetPaths?: Set<string>): SemanticQueryMatch[] {
 		const queryTerms = tokenize(query);
 		if (queryTerms.length === 0) {
 			return [];
 		}
 
-		return [...this.records.values()]
-			.filter((record) => record.path !== currentPath && !this.isExcludedTarget(record.path))
+		const scoped = allowedTargetPaths && allowedTargetPaths.size > 0 && allowedTargetPaths.size <= 128;
+		const resultKey = scoped ? "" : buildSparseResultCacheKey(query, limit);
+		const cached = this.sparseResultCache.get(resultKey);
+		if (!scoped && cached) {
+			return cached;
+		}
+
+		const records = scoped
+			? Array.from(allowedTargetPaths ?? [])
+				.map((path) => this.records.get(path))
+				.filter((record): record is SemanticNoteRecord => Boolean(record))
+			: [...this.records.values()];
+		const matches = records
+			.filter((record) => !this.isExcludedTarget(record.path))
 			.map((record) => ({
 				record,
 				score: sparseScore(queryTerms, record),
@@ -928,6 +1056,10 @@ export class SemanticIndex {
 				targetLink: record.path.replace(/\.md$/i, ""),
 				score,
 			}));
+		if (!scoped) {
+			this.sparseResultCache.set(resultKey, matches);
+		}
+		return matches;
 	}
 
 	private isExcludedTarget(path: string): boolean {
@@ -959,31 +1091,62 @@ function searchBruteForce(
 		.slice(0, Math.max(1, limit));
 }
 
+function getRecordSearchMetadata(record: SemanticNoteRecord): SemanticRecordSearchMetadata {
+	const cached = recordSearchMetadataCache.get(record);
+	if (cached) {
+		return cached;
+	}
+
+	const summaryCounts = new Map<string, number>();
+	for (const term of tokenize(record.summary)) {
+		summaryCounts.set(term, (summaryCounts.get(term) ?? 0) + 1);
+	}
+	const normalizedTitle = normalizeText(record.title);
+	const normalizedAliases = record.aliases.map(normalizeText);
+	const metadata: SemanticRecordSearchMetadata = {
+		normalizedTitle,
+		normalizedAliases,
+		titleTerms: new Set(tokenize(record.title)),
+		aliasTerms: new Set(record.aliases.flatMap((alias) => tokenize(alias))),
+		tagTerms: new Set(record.tags.flatMap((tag) => tokenize(tag))),
+		summaryTerms: new Set(summaryCounts.keys()),
+		summaryCounts,
+		titleAcronym: buildPhraseAcronym(record.title),
+		aliasAcronyms: record.aliases
+			.map((alias) => buildPhraseAcronym(alias))
+			.filter((value): value is string => Boolean(value)),
+		normalizedTitleCompact: normalizedTitle.replace(/\s+/g, ""),
+		normalizedAliasesCompact: normalizedAliases.map((alias) => alias.replace(/\s+/g, "")),
+		compactPhrases: [record.title, ...record.aliases]
+			.map((phrase) => compactNormalizeText(phrase))
+			.filter((phrase) => phrase.length >= 4),
+		canonicalBoost: canonicalTargetBoost(record),
+		targetPenalty: targetPenalty(record),
+	};
+	recordSearchMetadataCache.set(record, metadata);
+	return metadata;
+}
+
 function scoreSemanticMatch(query: string, record: SemanticNoteRecord, queryVector: number[], embedding: number[]): number {
 	const baseScore = cosineSimilarity(queryVector, embedding);
-	const normalizedTitle = normalizeText(record.title);
+	const metadata = getRecordSearchMetadata(record);
 	const normalizedQuery = normalizeText(query);
 	const queryTerms = new Set(normalizedQuery.split(" ").filter(Boolean));
-	const titleTerms = new Set(normalizedTitle.split(" ").filter(Boolean));
-	const aliasTerms = new Set(record.aliases.flatMap((alias) => normalizeText(alias).split(" ").filter(Boolean)));
-	const summaryTerms = new Set(normalizeText(record.summary).split(" ").filter(Boolean));
-	const tagTerms = new Set(record.tags.flatMap((tag) => normalizeText(tag).split(" ").filter(Boolean)));
 
 	let lexicalOverlap = 0;
 	for (const term of queryTerms) {
-		if (titleTerms.has(term)) {
+		if (metadata.titleTerms.has(term)) {
 			lexicalOverlap += 1;
 		}
 	}
 	const titleOverlapBoost = queryTerms.size > 0 ? (lexicalOverlap / queryTerms.size) * 0.12 : 0;
-	const aliasOverlapBoost = overlapRatio(queryTerms, aliasTerms) * 0.12;
-	const summaryOverlapBoost = overlapRatio(queryTerms, summaryTerms) * 0.04;
-	const tagOverlapBoost = overlapRatio(queryTerms, tagTerms) * 0.02;
-	const exactSingleTermBoost = exactSingleTermSemanticBoost(queryTerms, titleTerms, aliasTerms, tagTerms);
+	const aliasOverlapBoost = overlapRatio(queryTerms, metadata.aliasTerms) * 0.12;
+	const summaryOverlapBoost = overlapRatio(queryTerms, metadata.summaryTerms) * 0.04;
+	const tagOverlapBoost = overlapRatio(queryTerms, metadata.tagTerms) * 0.02;
+	const exactSingleTermBoost = exactSingleTermSemanticBoost(queryTerms, metadata.titleTerms, metadata.aliasTerms, metadata.tagTerms);
 	const acronymBoost = acronymSemanticBoost(normalizedQuery, record);
 	const fuzzyBoost = fuzzyPhraseBoost(query, record);
-	const canonicalBoost = canonicalTargetBoost(record);
-	return baseScore + titleOverlapBoost + aliasOverlapBoost + summaryOverlapBoost + tagOverlapBoost + exactSingleTermBoost + acronymBoost + fuzzyBoost + canonicalBoost - targetPenalty(record);
+	return baseScore + titleOverlapBoost + aliasOverlapBoost + summaryOverlapBoost + tagOverlapBoost + exactSingleTermBoost + acronymBoost + fuzzyBoost + metadata.canonicalBoost - metadata.targetPenalty;
 }
 
 function contextualTargetBoost(
@@ -1124,43 +1287,36 @@ function exactSingleTermSemanticBoost(
 }
 
 function sparseScore(queryTerms: string[], record: SemanticNoteRecord): number {
-	const titleTerms = new Set(tokenize(record.title));
-	const aliasTerms = new Set(record.aliases.flatMap((alias) => tokenize(alias)));
-	const tagTerms = new Set(record.tags.flatMap((tag) => tokenize(tag)));
-	const summaryTerms = tokenize(record.summary);
-	const summaryCounts = new Map<string, number>();
-	for (const term of summaryTerms) {
-		summaryCounts.set(term, (summaryCounts.get(term) ?? 0) + 1);
-	}
+	const metadata = getRecordSearchMetadata(record);
 
 	let score = 0;
 	for (const term of queryTerms) {
-		if (titleTerms.has(term)) {
+		if (metadata.titleTerms.has(term)) {
 			score += 0.9;
 		}
-		if (aliasTerms.has(term)) {
+		if (metadata.aliasTerms.has(term)) {
 			score += 0.8;
 		}
-		if (tagTerms.has(term)) {
+		if (metadata.tagTerms.has(term)) {
 			score += 0.7;
 		}
-		const summaryHits = summaryCounts.get(term) ?? 0;
+		const summaryHits = metadata.summaryCounts.get(term) ?? 0;
 		if (summaryHits > 0) {
 			score += Math.min(0.45, 0.18 + (summaryHits * 0.08));
 		}
 	}
 
 	const normalizedQuery = normalizeText(queryTerms.join(" "));
-	if (normalizedQuery && record.aliases.some((alias) => normalizeText(alias) === normalizedQuery)) {
+	if (normalizedQuery && metadata.normalizedAliases.includes(normalizedQuery)) {
 		score += 0.45;
 	}
-	if (normalizedQuery && normalizeText(record.title) === normalizedQuery) {
+	if (normalizedQuery && metadata.normalizedTitle === normalizedQuery) {
 		score += 0.5;
 	}
 	score += sparseAcronymBoost(normalizedQuery, record);
 	score += sparseFuzzyPhraseBoost(queryTerms.join(" "), record);
-	score += canonicalTargetBoost(record) * 3;
-	score -= targetPenalty(record) * 3;
+	score += metadata.canonicalBoost * 3;
+	score -= metadata.targetPenalty * 3;
 
 	return Math.max(0, score);
 }
@@ -1174,24 +1330,19 @@ function acronymSemanticBoost(normalizedQuery: string, record: SemanticNoteRecor
 		return 0;
 	}
 
-	const titleAcronym = buildPhraseAcronym(record.title);
-	const aliasAcronyms = record.aliases
-		.map((alias) => buildPhraseAcronym(alias))
-		.filter((value): value is string => Boolean(value));
-	const normalizedTitle = normalizeText(record.title).replace(/\s+/g, "");
-	const normalizedAliases = record.aliases.map((alias) => normalizeText(alias).replace(/\s+/g, ""));
+	const metadata = getRecordSearchMetadata(record);
 
 	let boost = 0;
-	if (titleAcronym === queryAcronym) {
+	if (metadata.titleAcronym === queryAcronym) {
 		boost += 0.24;
 	}
-	if (aliasAcronyms.includes(queryAcronym)) {
+	if (metadata.aliasAcronyms.includes(queryAcronym)) {
 		boost += 0.22;
 	}
-	if (normalizedTitle === queryAcronym) {
+	if (metadata.normalizedTitleCompact === queryAcronym) {
 		boost += 0.28;
 	}
-	if (normalizedAliases.includes(queryAcronym)) {
+	if (metadata.normalizedAliasesCompact.includes(queryAcronym)) {
 		boost += 0.26;
 	}
 	return boost;
@@ -1205,24 +1356,19 @@ function sparseAcronymBoost(normalizedQuery: string, record: SemanticNoteRecord)
 	if (!queryAcronym || queryAcronym.length < 2) {
 		return 0;
 	}
-	const normalizedTitle = normalizeText(record.title).replace(/\s+/g, "");
-	const normalizedAliases = record.aliases.map((alias) => normalizeText(alias).replace(/\s+/g, ""));
-	const titleAcronym = buildPhraseAcronym(record.title);
-	const aliasAcronyms = record.aliases
-		.map((alias) => buildPhraseAcronym(alias))
-		.filter((value): value is string => Boolean(value));
+	const metadata = getRecordSearchMetadata(record);
 
 	let boost = 0;
-	if (normalizedTitle === queryAcronym) {
+	if (metadata.normalizedTitleCompact === queryAcronym) {
 		boost += 1.2;
 	}
-	if (normalizedAliases.includes(queryAcronym)) {
+	if (metadata.normalizedAliasesCompact.includes(queryAcronym)) {
 		boost += 1.1;
 	}
-	if (titleAcronym === queryAcronym) {
+	if (metadata.titleAcronym === queryAcronym) {
 		boost += 0.95;
 	}
-	if (aliasAcronyms.includes(queryAcronym)) {
+	if (metadata.aliasAcronyms.includes(queryAcronym)) {
 		boost += 0.9;
 	}
 	return boost;
@@ -1235,11 +1381,7 @@ function fuzzyPhraseBoost(query: string, record: SemanticNoteRecord): number {
 	}
 
 	let best = 0;
-	for (const phrase of [record.title, ...record.aliases]) {
-		const compactPhrase = compactNormalizeText(phrase);
-		if (!compactPhrase || compactPhrase.length < 4) {
-			continue;
-		}
+	for (const compactPhrase of getRecordSearchMetadata(record).compactPhrases) {
 		if (compactPhrase === compactQuery) {
 			best = Math.max(best, 0.22);
 			continue;
@@ -1259,11 +1401,7 @@ function sparseFuzzyPhraseBoost(query: string, record: SemanticNoteRecord): numb
 	}
 
 	let best = 0;
-	for (const phrase of [record.title, ...record.aliases]) {
-		const compactPhrase = compactNormalizeText(phrase);
-		if (!compactPhrase || compactPhrase.length < 4) {
-			continue;
-		}
+	for (const compactPhrase of getRecordSearchMetadata(record).compactPhrases) {
 		if (compactPhrase === compactQuery) {
 			best = Math.max(best, 0.9);
 			continue;
@@ -1386,6 +1524,14 @@ function buildQueryVectorCacheKey(providerId: string, modelId: string, query: st
 
 function buildQueryResultCacheKey(providerId: string, modelId: string, query: string, limit: number): string {
 	return `${providerId}::${modelId}::${limit}::${normalizeText(query)}`;
+}
+
+function buildSparseResultCacheKey(query: string, limit: number): string {
+	return `${limit}::${normalizeText(query)}`;
+}
+
+function getExpandedHybridLimit(limit: number): number {
+	return Math.max(limit * 4, 24);
 }
 
 async function notifyProgress(

@@ -9,7 +9,7 @@ import type {
 	VaultGraphPreview,
 } from "./types";
 import type { SemanticAutoLinkerSettings } from "./types";
-import { analyzeNoteContent, buildAnalysisMatchingContext } from "./matcher";
+import { analyzeNoteContent, buildAnalysisMatchingContext, collectSemanticQueryCandidatesForSource } from "./matcher";
 import type { SemanticIndex } from "./semantic-index";
 import { VaultIndex } from "./vault-index";
 
@@ -83,6 +83,17 @@ export async function analyzeEntireVault(
 	let lastPreviewAt = 0;
 	const analysisConcurrency = getAnalysisConcurrency(settings, providerId, records.length);
 	const matchingContext = buildAnalysisMatchingContext(index, settings);
+	matchingContext.useNoteSemanticCandidates = settings.semanticMode && providerId !== "none";
+	if (settings.semanticMode && settings.enableSemanticSuggestions !== false && providerId !== "none") {
+		const prewarmQueries = collectWholeVaultSemanticQueries(sources, settings);
+		if (prewarmQueries.length > 0) {
+			if (matchingContext.useNoteSemanticCandidates) {
+				await semanticIndex.prewarmQueryVectors(prewarmQueries);
+			} else {
+				await semanticIndex.prewarmSimilarQueries(prewarmQueries, settings.semanticTopK);
+			}
+		}
+	}
 	await mapWithConcurrency(sources, analysisConcurrency, async ({ record, source }) =>
 		await analyzeNoteContent(record, source, index, settings, semanticIndex, undefined, matchingContext),
 		async (analysis) => {
@@ -102,7 +113,9 @@ export async function analyzeEntireVault(
 				message: `Analyzed ${analyzedCount}/${sources.length} note${sources.length === 1 ? "" : "s"}.`,
 				preview: shouldEmitPreview ? cloneVaultAnalysisForPreview(analysisResult) : undefined,
 			});
-			await yieldToUi();
+			if (shouldYieldDuringAnalysis(analyzedCount, sources.length)) {
+				await yieldToUi();
+			}
 		},
 	);
 
@@ -115,6 +128,22 @@ export async function analyzeEntireVault(
 		preview: cloneVaultAnalysisForPreview(analysisResult),
 	});
 	return analysisResult;
+}
+
+function collectWholeVaultSemanticQueries(
+	sources: Array<{ record: NoteRecord; source: string }>,
+	settings: SemanticAutoLinkerSettings,
+): string[] {
+	const counts = new Map<string, number>();
+	const queryLimitPerNote = 6;
+	for (const { source } of sources) {
+		for (const query of collectSemanticQueryCandidatesForSource(source, settings).slice(0, queryLimitPerNote)) {
+			counts.set(query, (counts.get(query) ?? 0) + 1);
+		}
+	}
+	return [...counts.entries()]
+		.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+		.map(([query]) => query);
 }
 
 function isWholeVaultSourceCandidate(record: NoteRecord): boolean {
@@ -145,6 +174,12 @@ function yieldToUi(): Promise<void> {
 	return new Promise((resolve) => {
 		setTimeout(resolve, 0);
 	});
+}
+
+function shouldYieldDuringAnalysis(current: number, total: number): boolean {
+	return current === total
+		|| current <= 3
+		|| current % (total >= 2000 ? 50 : 25) === 0;
 }
 
 function getReadConcurrency(noteCount: number): number {

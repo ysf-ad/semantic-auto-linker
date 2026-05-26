@@ -42,6 +42,8 @@ export interface AnalysisMatchingContext {
 	acronymStartLetters: Set<string>;
 	maxTokenLength: number;
 	semanticSingleWordHints: Set<string>;
+	skipSemanticDocumentGate?: boolean;
+	useNoteSemanticCandidates?: boolean;
 }
 
 export function buildAnalysisMatchingContext(
@@ -201,25 +203,34 @@ export async function analyzeNoteContent(
 		try {
 			const semanticSpans = buildSemanticSpanCandidates(tokens, analysisSource, occupied, protectedRanges, selectionStart, selectionEnd, semanticSingleWordHints, settings);
 			if (semanticSpans.length > 0) {
-				const documentQuery = buildDocumentSemanticQuery(semanticSpans, analysisSource, settings);
-				const documentMatches = documentQuery
-					? await semanticIndex.findHybridSimilarNotes(documentQuery, file.path, Math.max(settings.semanticTopK, 6))
-					: [];
+				const documentMatches = matchingContext?.useNoteSemanticCandidates
+					? await semanticIndex.findRelatedNotesForPath(file.path, usedTargets, Math.max(settings.semanticTopK * 2, 12))
+					: matchingContext?.skipSemanticDocumentGate
+						? []
+						: await findDocumentSemanticMatches(semanticIndex, semanticSpans, analysisSource, settings, file.path);
+				const candidateLimit = matchingContext?.useNoteSemanticCandidates
+					? Math.max(settings.semanticTopK * 2, 12)
+					: Math.max(settings.semanticTopK, 6);
 				const candidateTargetPaths = new Set(
 					documentMatches
 						.filter((match) => !excludedTargetPaths.has(match.targetPath))
-						.filter((match) => match.score >= Math.max(settings.semanticDisplayThreshold, 0.42))
-						.slice(0, Math.max(settings.semanticTopK, 6))
+						.filter((match) => matchingContext?.useNoteSemanticCandidates || match.score >= Math.max(settings.semanticDisplayThreshold, 0.42))
+						.slice(0, candidateLimit)
 						.map((match) => match.targetPath),
 				);
-				const spanBudget = candidateTargetPaths.size > 0 ? 4 : 6;
+				const spanBudget = matchingContext?.useNoteSemanticCandidates || candidateTargetPaths.size === 0 ? 6 : 4;
 				const spanQueries = semanticSpans
 					.slice(0, spanBudget)
 					.map((span) => span.normalized);
 				const matchesByQuery = new Map<string, SemanticQueryMatch[]>();
 				await Promise.all(
 					spanQueries.map(async (query) => {
-						const mergedMatches = await semanticIndex.findHybridSimilarNotes(query, file.path, settings.semanticTopK);
+						const mergedMatches = await semanticIndex.findHybridSimilarNotes(
+							query,
+							file.path,
+							settings.semanticTopK,
+							candidateTargetPaths.size > 0 ? candidateTargetPaths : undefined,
+						);
 						const shortlistedMatches = candidateTargetPaths.size > 0
 							? mergedMatches.filter((match) => candidateTargetPaths.has(match.targetPath))
 							: mergedMatches;
@@ -519,6 +530,19 @@ function buildDocumentSemanticQuery(
 	return fallback.length <= settings.semanticSummaryLength
 		? fallback
 		: fallback.slice(0, settings.semanticSummaryLength).trim();
+}
+
+async function findDocumentSemanticMatches(
+	semanticIndex: SemanticIndex,
+	semanticSpans: SemanticSpanCandidate[],
+	source: string,
+	settings: SemanticAutoLinkerSettings,
+	currentPath: string,
+): Promise<SemanticQueryMatch[]> {
+	const documentQuery = buildDocumentSemanticQuery(semanticSpans, source, settings);
+	return documentQuery
+		? await semanticIndex.findHybridSimilarNotes(documentQuery, currentPath, Math.max(settings.semanticTopK, 6))
+		: [];
 }
 
 function getSemanticSuggestionBudget(path: string, title: string): number {

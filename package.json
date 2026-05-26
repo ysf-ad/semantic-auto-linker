@@ -1,6 +1,6 @@
 {
 	"name": "semantic-auto-linker",
-	"version": "1.0.13",
+	"version": "1.0.14",
 	"description": "Safe and reviewable auto-linking for Obsidian",
 	"main": "main.js",
 	"type": "module",
@@ -14,7 +14,16 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint ."
 	},
-	"keywords": [],
+	"keywords": [
+		"obsidian-plugin",
+		"obsidian",
+		"semantic-search",
+		"auto-linking",
+		"pkm",
+		"knowledge-management",
+		"embeddings",
+		"typescript"
+	],
 	"license": "MIT",
 	"devDependencies": {
 		"@eslint/js": "9.30.1",

@@ -16,10 +16,17 @@ It finds missing wiki-links, previews the graph impact before writing anything, 
 
 If Semantic Auto-Linker saves you time, consider starring the repo. Stars help other Obsidian users find the plugin.
 
-It focuses on two things:
+It focuses on three things:
 - safe inline linking with review before write
 - semantic structure discovery across notes and concepts
 - vault-wide review with graph impact before applying links
+
+## Best for
+
+- large note vaults
+- sparse graph users
+- PKM and research notes
+- people who want review-before-write linking
 
 ## Preview links before applying them
 
